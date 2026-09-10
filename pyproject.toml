@@ -1,0 +1,16 @@
+[project]
+name = "microgrid"
+version = "0.1.0"
+description = "2026 国赛 C 题：带储能的非孤岛微网购电与储能调控"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy",
+    "scipy>=1.18",
+    "pandas",
+    "openpyxl",
+    "matplotlib",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

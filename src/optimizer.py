@@ -72,6 +72,17 @@ class EqualityBuilder:
         return mat.tocsr(), np.asarray(self._rhs, dtype=float)
 
 
+BALANCE_SIGNS = {
+    "G": 1.0,  # 购电量（问 3 的当天段用 G0 常数 + 分裂变量代替）
+    "DP": 1.0,  # 问 3 增购 Δ⁺
+    "DM": -1.0,  # 问 3 减购 Δ⁻
+    "D": 1.0,
+    "E": 1.0,
+    "C": -1.0,
+    "W": -1.0,
+}
+
+
 def balance_rows(
     builder: EqualityBuilder,
     n_seg: int,
@@ -81,18 +92,14 @@ def balance_rows(
 ) -> list[int]:
     """能量平衡：G_t + PV_t + D_t (+ E_t) = L_t + C_t + W_t。
 
-    off 需含 'G','C','D','W'；含 'E' 时把紧急购电量计入供给侧。
+    off 需含 'G','C','D','W'；含 'E' 时把紧急购电量计入供给侧。问 3 的重优化用
+    'DP','DM' 代替 'G'（$G^a = G^0 + \\Delta^+ - \\Delta^-$，$G^0$ 并入右端项）。
+    每个块名的系数由 `BALANCE_SIGNS` 给出，不在其中的块名（如 'S'）被忽略。
     """
     rows = []
+    names = [name for name in off if name in BALANCE_SIGNS]
     for t in range(n_seg):
-        coeffs = {
-            off["G"] + t: 1.0,
-            off["D"] + t: 1.0,
-            off["C"] + t: -1.0,
-            off["W"] + t: -1.0,
-        }
-        if "E" in off:
-            coeffs[off["E"] + t] = 1.0
+        coeffs = {off[name] + t: BALANCE_SIGNS[name] for name in names}
         rows.append(builder.add_row(coeffs, float(load_kwh[t] - pv_kwh[t])))
     return rows
 
@@ -137,6 +144,8 @@ def block_bounds(
     """各变量块的逐元素上下界。"""
     return {
         "G": (0.0, None),
+        "DP": (0.0, None),  # 问 3 增购量
+        "DM": (0.0, None),  # 问 3 减购量，上界 G0_t 在求解时按段填入
         "E": (0.0, None),
         "C": (0.0, p_max),
         "D": (0.0, p_max),
@@ -257,9 +266,10 @@ def _fill_bounds(lb: np.ndarray, ub: np.ndarray, name: str, off: int, n: int) ->
 
 @dataclass
 class SAAStructure:
-    """SAA LP 中与曲线数值无关的部分：稀疏矩阵、块偏移、边界。
+    """SAA / 重优化 LP 中与曲线数值无关的部分：稀疏矩阵、块偏移、边界。
 
-    结构只取决于 (M, n_today, n_future)，按天缓存复用，避免逐日重复装配。
+    结构只取决于 (M, n_today, n_future, 第一阶段块名)，按天缓存复用，避免逐日重复装配。
+    问 2 的第一阶段块是 ('G',)；问 3 重优化换成 ('DP','DM')，其余完全相同。
     """
 
     m: int
@@ -268,30 +278,33 @@ class SAAStructure:
     n_h: int
     n_var: int
     g0_off: int
+    first: dict[str, int]
     blocks: list[dict[str, int]]
     a_eq: sp.csr_matrix
     bounds: np.ndarray  # (n_var, 2) 的 [下界, 上界]
     rows_per_scen: int
 
 
-_SAA_CACHE: dict[tuple[int, int, int], SAAStructure] = {}
+_SAA_CACHE: dict[tuple[int, int, int, tuple[str, ...]], SAAStructure] = {}
 
 
-def _saa_structure(m: int, n_today: int, n_future: int) -> SAAStructure:
-    """装配 SAA LP 的等式矩阵与边界（带缓存）。
+def _saa_structure(
+    m: int, n_today: int, n_future: int, first_stage: tuple[str, ...] = ("G",)
+) -> SAAStructure:
+    """装配 SAA / 重优化 LP 的等式矩阵与边界（带缓存）。
 
-    变量顺序：G0(n_today) ‖ 每个场景 [C, D, W, E, S](n_h) + G(n_future)。
+    变量顺序：第一阶段块(各 n_today) ‖ 每个场景 [C, D, W, E, S](n_h) + G(n_future)。
     等式行顺序（每个场景连续 2*n_h 行）：当天平衡、次日平衡、SOC 链。
     """
-    key = (m, n_today, n_future)
+    key = (m, n_today, n_future, first_stage)
     hit = _SAA_CACHE.get(key)
     if hit is not None:
         return hit
 
     n_h = n_today + n_future
     lengths = [("C", n_h), ("D", n_h), ("W", n_h), ("E", n_h), ("S", n_h), ("G", n_future)]
-    g0_off = 0
-    cursor = n_today
+    first = {name: i * n_today for i, name in enumerate(first_stage)}
+    cursor = len(first_stage) * n_today
     blocks: list[dict[str, int]] = []
     for _ in range(m):
         block = {}
@@ -303,7 +316,8 @@ def _saa_structure(m: int, n_today: int, n_future: int) -> SAAStructure:
 
     lb = np.zeros(n_var)
     ub = np.full(n_var, np.inf)
-    _fill_bounds(lb, ub, "G", g0_off, n_today)
+    for name, off in first.items():
+        _fill_bounds(lb, ub, name, off, n_today)
     for block in blocks:
         for name, ln in lengths:
             _fill_bounds(lb, ub, name, block[name], ln)
@@ -312,13 +326,10 @@ def _saa_structure(m: int, n_today: int, n_future: int) -> SAAStructure:
     zeros_today = np.zeros(n_today)
     zeros_future = np.zeros(n_future)
     for block in blocks:
-        off_today = {
-            "G": g0_off,
-            "C": block["C"],
-            "D": block["D"],
-            "W": block["W"],
-            "E": block["E"],
-        }
+        off_today = dict(first)
+        off_today.update(
+            {"C": block["C"], "D": block["D"], "W": block["W"], "E": block["E"]}
+        )
         balance_rows(builder, n_today, off_today, zeros_today, zeros_today)
         if n_future:
             off_next = {
@@ -338,7 +349,8 @@ def _saa_structure(m: int, n_today: int, n_future: int) -> SAAStructure:
         n_future=n_future,
         n_h=n_h,
         n_var=n_var,
-        g0_off=g0_off,
+        g0_off=first.get("G", 0),
+        first=first,
         blocks=blocks,
         a_eq=a_eq,
         bounds=np.column_stack([lb, ub]),
@@ -624,3 +636,112 @@ class StorageRollingSolver:
             G=take("G"),
             objective=float(res.fun),
         )
+
+
+# ---------------------------------------------------------------------------
+# 问 3：预报时刻的重优化 LP（调整购电量）
+# ---------------------------------------------------------------------------
+
+ADJUST_UP = 1.5  # 增购单价系数
+ADJUST_DOWN = 0.5  # 减购违约金系数
+
+
+@dataclass
+class ReadjustResult:
+    """重优化 LP 的解。数组均为当天 144 段的全长向量，$t<t_0$ 的部分保持 $G^0$。"""
+
+    Ga: np.ndarray
+    dplus: np.ndarray
+    dminus: np.ndarray
+    objective: float  # 含常数项 Σ_{t≥t0} p_t G0_t
+    adjust_cost: float  # 1.5 p·Δ⁺ − 0.5 p·Δ⁻（相对计划费的净增量）
+    status: str = ""
+
+
+def solve_readjust(
+    t0: int,
+    price48: np.ndarray,
+    G0: np.ndarray,
+    L_scen: np.ndarray,
+    PV_scen: np.ndarray,
+    L_next: np.ndarray,
+    PV_next: np.ndarray,
+    soc_init: float,
+    eps: float = EPS,
+    *,
+    n_day: int = T,
+) -> ReadjustResult:
+    """预报时刻 $t_0$ 的重优化：在冻结的 $G^0$ 上决定调整量 $\\Delta^\\pm$。
+
+    时域 = 当天剩余段 $t_0..n_{day}-1$ + 次日全部段；`price48` 传当天 + 次日的完整电价，
+    内部切成 `price48[t0:n_day] ‖ price48[n_day:]`。`L_scen`/`PV_scen` 形状 (M, n_day−t0)。
+
+    第一阶段（跨场景共享）：$\\Delta^+_t\\ge0$、$0\\le\\Delta^-_t\\le G^0_t$，
+    $G^a_t = G^0_t + \\Delta^+_t - \\Delta^-_t$ 代入当天平衡行（系数 ±1，$-G^0_t$ 进右端项）。
+    目标在 $\\Delta^+$ 上取 $1.5p_t$、在 $\\Delta^-$ 上取 $-0.5p_t$，与结算式一致；
+    两者同段净成本 $+p_t>0$，故不会共存。第二阶段与问 2 的 SAA 完全相同。
+    """
+    t0 = int(t0)
+    price48 = np.asarray(price48, dtype=float)
+    G0 = np.asarray(G0, dtype=float)
+    L_scen = np.atleast_2d(np.asarray(L_scen, dtype=float))
+    PV_scen = np.atleast_2d(np.asarray(PV_scen, dtype=float))
+    L_next = np.asarray(L_next, dtype=float).ravel()
+    PV_next = np.asarray(PV_next, dtype=float).ravel()
+
+    n_rem = n_day - t0
+    n_future = price48.size - n_day
+    m = L_scen.shape[0]
+    assert G0.size == n_day and 0 <= t0 < n_day
+    assert L_scen.shape == (m, n_rem) and PV_scen.shape == (m, n_rem)
+    assert L_next.size == n_future and PV_next.size == n_future
+
+    price_h = np.concatenate([price48[t0:n_day], price48[n_day:]])
+    g0_rem = G0[t0:]
+    struct = _saa_structure(m, n_rem, n_future, ("DP", "DM"))
+    dp_off, dm_off = struct.first["DP"], struct.first["DM"]
+
+    cost = np.zeros(struct.n_var)
+    cost[dp_off : dp_off + n_rem] = ADJUST_UP * price_h[:n_rem]
+    cost[dm_off : dm_off + n_rem] = -ADJUST_DOWN * price_h[:n_rem]
+    for block in struct.blocks:
+        cost[block["E"] : block["E"] + struct.n_h] = 5.0 * price_h / m
+        cost[block["C"] : block["C"] + struct.n_h] = eps
+        cost[block["D"] : block["D"] + struct.n_h] = eps
+        cost[block["W"] : block["W"] + struct.n_h] = eps
+        if n_future:
+            cost[block["G"] : block["G"] + n_future] = price_h[n_rem:] / m
+
+    bounds = struct.bounds.copy()
+    bounds[dm_off : dm_off + n_rem, 1] = np.maximum(g0_rem, 0.0)  # Δ⁻_t ≤ G0_t ⇒ G^a ≥ 0
+
+    net_future = L_next - PV_next
+    soc_rhs = np.zeros(struct.n_h)
+    soc_rhs[0] = float(soc_init)
+    b_eq = np.empty(m * struct.rows_per_scen)
+    for w in range(m):
+        base = w * struct.rows_per_scen
+        b_eq[base : base + n_rem] = L_scen[w] - PV_scen[w] - g0_rem
+        b_eq[base + n_rem : base + struct.n_h] = net_future
+        b_eq[base + struct.n_h : base + struct.rows_per_scen] = soc_rhs
+
+    res = linprog(cost, A_eq=struct.a_eq, b_eq=b_eq, bounds=bounds, method="highs")
+    if not res.success:
+        raise RuntimeError(f"重优化 LP 求解失败（段 {t0}）：{res.message}")
+
+    dplus = np.zeros(n_day)
+    dminus = np.zeros(n_day)
+    dplus[t0:] = np.maximum(res.x[dp_off : dp_off + n_rem], 0.0)
+    dminus[t0:] = np.clip(res.x[dm_off : dm_off + n_rem], 0.0, np.maximum(g0_rem, 0.0))
+    Ga = np.maximum(G0 + dplus - dminus, 0.0)
+    adjust_cost = float(
+        ADJUST_UP * price48[:n_day] @ dplus - ADJUST_DOWN * price48[:n_day] @ dminus
+    )
+    return ReadjustResult(
+        Ga=Ga,
+        dplus=dplus,
+        dminus=dminus,
+        objective=float(res.fun) + float(price48[t0:n_day] @ g0_rem),
+        adjust_cost=adjust_cost,
+        status=res.message,
+    )

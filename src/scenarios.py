@@ -53,6 +53,11 @@ class ResidualLibrary:
         self._by_type.setdefault(entry.day_type, []).append(entry)
         return entry
 
+    def select(self, d: date, m: int = M_SCEN) -> list[ResidualEntry]:
+        """决策日 d 可用的最近 m 个同类型历史日残差（日期严格早于 d）。"""
+        pool = [e for e in self._by_type.get(day_type(d), []) if e.day < d]
+        return pool[-int(m):] if m > 0 else []
+
     def scenarios(
         self,
         d: date,
@@ -66,8 +71,7 @@ class ResidualLibrary:
         """
         load_pred = np.asarray(load_pred, dtype=float)
         pv_pred = np.asarray(pv_pred, dtype=float)
-        pool = [e for e in self._by_type.get(day_type(d), []) if e.day < d]
-        chosen = pool[-int(m):] if m > 0 else []
+        chosen = self.select(d, m)
         if not chosen:
             return load_pred[None, :].copy(), pv_pred[None, :].copy()
         r_load = np.stack([e.r_load for e in chosen])
@@ -78,4 +82,45 @@ class ResidualLibrary:
         )
 
 
-__all__ = ["M_SCEN", "ResidualEntry", "ResidualLibrary"]
+@dataclass
+class PVResidualLibraryByIssue:
+    """问 3：按发布时刻分库的光伏残差，与问 2 的负载残差按同一历史日配对。
+
+    发布时刻 $h_0$ 的库只存当天 $[6h_0, 144)$ 段的「真值 − 该时刻插值预报」，
+    因此 0:00 库 144 段、6:00 库 108 段、12:00 库 72 段、18:00 库 36 段。
+    场景选择规则与问 2 一致：取最近 $M$ 个同类型历史日；负载残差取自 `load` 库的同一天，
+    保留负载与光伏的同日相关性。
+    """
+
+    load: ResidualLibrary
+    _r: dict[tuple[int, date], np.ndarray] = field(default_factory=dict)
+
+    def update(self, d: date, issue_hour: int, residual_segments: np.ndarray) -> None:
+        """追加日期 d、发布时刻 issue_hour 的光伏残差（长度 $144-6h_0$）。"""
+        self._r[(int(issue_hour), d)] = np.asarray(residual_segments, dtype=float)
+
+    def scenarios(
+        self,
+        d: date,
+        issue_hour: int,
+        load_pred: np.ndarray,
+        pv_pred: np.ndarray,
+        m: int = M_SCEN,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """决策时刻 (d, issue_hour) 的等权场景 (M', n)；load_pred/pv_pred 已切到剩余段。"""
+        load_pred = np.asarray(load_pred, dtype=float)
+        pv_pred = np.asarray(pv_pred, dtype=float)
+        n = pv_pred.size
+        chosen = [e for e in self.load.select(d, m) if (int(issue_hour), e.day) in self._r]
+        if not chosen:
+            return load_pred[None, :].copy(), pv_pred[None, :].copy()
+        r_load = np.stack([e.r_load[-n:] for e in chosen])
+        r_pv = np.stack([self._r[(int(issue_hour), e.day)] for e in chosen])
+        assert r_pv.shape[1] == n, "光伏残差长度与剩余段数不符"
+        return (
+            np.clip(load_pred[None, :] + r_load, 0.0, None),
+            np.clip(pv_pred[None, :] + r_pv, 0.0, None),
+        )
+
+
+__all__ = ["M_SCEN", "ResidualEntry", "ResidualLibrary", "PVResidualLibraryByIssue"]

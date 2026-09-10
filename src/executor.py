@@ -20,7 +20,7 @@ CLIP_TOL = 1e-9
 
 @dataclass
 class DayExecution:
-    """一天 144 段的执行值（kWh）。"""
+    """一天 144 段的执行值（kWh）。分块执行时由多次 `run_day` 共同填满。"""
 
     day: date
     C: np.ndarray
@@ -33,6 +33,19 @@ class DayExecution:
     @property
     def soc_end(self) -> float:
         return float(self.S[-1])
+
+    @classmethod
+    def empty(cls, day: date, soc_start: float, n_seg: int = T) -> "DayExecution":
+        """全零的一天，供分段执行时逐块写入。"""
+        return cls(
+            day=day,
+            C=np.zeros(n_seg),
+            D=np.zeros(n_seg),
+            S=np.zeros(n_seg),
+            E=np.zeros(n_seg),
+            W=np.zeros(n_seg),
+            soc_start=float(soc_start),
+        )
 
 
 def run_day(
@@ -48,22 +61,28 @@ def run_day(
     solver: StorageRollingSolver,
     step_minutes: int = 10,
     n_seg: int = T,
+    *,
+    t_start: int = 0,
+    t_end: int | None = None,
+    out: DayExecution | None = None,
 ) -> DayExecution:
-    """执行日期 d 的一天，返回逐段执行值。"""
+    """执行日期 d 的段区间 `[t_start, t_end)`（默认整天），返回逐段执行值。
+
+    `soc_init` 是区间起点前的储电量 $S_{t_{start}-1}$；`out` 给出时就地写入该区间，
+    使问 3 能在 0/36/72/108 处暂停、重优化后带着当前 SOC 续跑同一天。
+    """
     g_today = np.asarray(g_today, dtype=float)
     load_true = np.asarray(load_true, dtype=float)
     pv_true = np.asarray(pv_true, dtype=float)
     k = max(1, round(step_minutes / 10))
+    t_end = n_seg if t_end is None else int(t_end)
 
-    C = np.zeros(n_seg)
-    D = np.zeros(n_seg)
-    S = np.zeros(n_seg)
-    E = np.zeros(n_seg)
-    W = np.zeros(n_seg)
+    ex = DayExecution.empty(d, soc_init, n_seg) if out is None else out
+    C, D, S, E, W = ex.C, ex.D, ex.S, ex.E, ex.W
     soc = float(soc_init)
 
-    t = 0
-    while t < n_seg:
+    t = int(t_start)
+    while t < t_end:
         step = solver.solve(
             t,
             soc,
@@ -75,7 +94,7 @@ def run_day(
             pv_future,
             g_today,
         )
-        for tau in range(t, min(t + k, n_seg)):
+        for tau in range(t, min(t + k, t_end)):
             c = float(step.C[tau])
             dis = float(step.D[tau])
             c = 0.0 if c < CLIP_TOL else c
@@ -92,7 +111,7 @@ def run_day(
             S[tau] = soc
         t += k
 
-    return DayExecution(day=d, C=C, D=D, S=S, E=E, W=W, soc_start=float(soc_init))
+    return ex
 
 
 __all__ = ["DayExecution", "run_day"]

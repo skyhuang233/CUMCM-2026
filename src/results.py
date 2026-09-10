@@ -13,7 +13,12 @@ import openpyxl
 
 from .data import INTERVAL_LABELS, INTERVAL_SEGS, SEG_LABELS
 from .optimizer import LPResult
-from .settlement import cost_q2, emergency_intervals, merge_emergency_intervals  # noqa: F401
+from .settlement import (  # noqa: F401
+    cost_q2,
+    cost_q3,
+    emergency_intervals,
+    merge_emergency_intervals,
+)
 
 # 表 1 指定的 10 分钟段（10:00-10:10 … 20:00-20:10）
 TABLE1_SEGS = [60, 72, 84, 96, 108, 120]
@@ -183,3 +188,121 @@ def write_result2(days: Sequence, path: str = "results/result2.xlsx") -> str:
 
     wb.save(path)
     return path
+
+
+# ---------------------------------------------------------------------------
+# 问 3：调整购电量的写出、四日摘要与变体对比表
+# ---------------------------------------------------------------------------
+
+
+def summarize_day_q3(day, price: np.ndarray) -> dict:
+    """一天的表 1（计划与调整购电）、表 2（执行充放电与储电量）、表 3（紧急购电区间）。
+
+    `day` 需具备 G0, Ga, C, D, S, E, soc_start 属性（`run_q3.DayResult` 或等价对象）。
+    表 1 的购电量与购电费按**提交的** $G^a$ 与问 3 的四项分解计费。
+    """
+    price = np.asarray(price, dtype=float)
+    G0 = np.asarray(day.G0, dtype=float)
+    Ga = np.asarray(day.Ga, dtype=float)
+    cost = cost_q3(price, G0, Ga, day.E)
+    return {
+        "date": day.day,
+        "seg_labels": TABLE1_LABELS,
+        "seg_plan": G0[TABLE1_SEGS],
+        "seg_purchase": Ga[TABLE1_SEGS],
+        "daily_plan": float(G0.sum()),
+        "daily_purchase": float(Ga.sum()),
+        "cost": cost,
+        "purchase_cost": cost["total"],
+        "emergency_kwh": float(np.sum(day.E)),
+        "adjust_kwh": float(np.abs(Ga - G0).sum()),
+        "interval_labels": INTERVAL_LABELS,
+        "charge": interval_sums(day.C),
+        "discharge": interval_sums(day.D),
+        "soc_start": float(day.soc_start),
+        "soc_end": float(np.asarray(day.S)[-1]),
+        "emergency": emergency_intervals(day.day, day.E),
+    }
+
+
+def print_day_summary_q3(summary: dict) -> None:
+    """终端打印问 3 某一天的表 1 / 表 2 / 表 3。"""
+    c = summary["cost"]
+    print(f"=== {summary['date'].isoformat()} ===")
+    print("表 1 购电量（kWh）")
+    print(f"  {'时间段':>12}  {'计划购电量':>12}  {'调整购电量':>12}")
+    for name, g0, ga in zip(summary["seg_labels"], summary["seg_plan"], summary["seg_purchase"]):
+        print(f"  {name:>12}  {g0:12.2f}  {ga:12.2f}")
+    print(f"  {'全天购电量':>12}  {summary['daily_plan']:12.2f}  {summary['daily_purchase']:12.2f}")
+    print(
+        f"  {'全天购电费':>12}  {c['total']:12.2f} 元"
+        f"（计划 {c['plan']:.2f} + 减购违约 {c['curtail_penalty']:.2f}"
+        f" + 增购 {c['extra']:.2f} + 紧急 {c['emergency']:.2f}）"
+    )
+    print("表 2 充放电量与储电量（kWh，执行值）")
+    print(f"  {'时间段':>12}  {'充电量':>10}  {'放电量':>10}")
+    for name, ch, dis in zip(summary["interval_labels"], summary["charge"], summary["discharge"]):
+        print(f"  {name:>12}  {ch:10.2f}  {dis:10.2f}")
+    print(f"  {'0:00 储电量':>12}  {summary['soc_start']:10.2f}")
+    print(f"  {'24:00 储电量':>12}  {summary['soc_end']:10.2f}")
+    print("表 3 紧急购电量（kWh）")
+    if not summary["emergency"]:
+        print("  （当日无紧急购电）")
+    for label, kwh in summary["emergency"]:
+        print(f"  {label:>12}  {kwh:10.2f}")
+    print()
+
+
+def write_result3(days: Sequence, path: str = "results/result3.xlsx") -> str:
+    """写出 result3.xlsx：『计划购电量』『调整购电量』『充放电量』『紧急购电量』四张工作表。"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    wb = openpyxl.Workbook()
+
+    ws = wb.active
+    ws.title = "计划购电量"
+    ws.append(["日期"] + SEG_LABELS)
+    for day in days:
+        ws.append([day.day.isoformat()] + [round(float(v), 4) for v in day.G0])
+
+    ws2 = wb.create_sheet("调整购电量")
+    ws2.append(["日期"] + SEG_LABELS)
+    for day in days:
+        ws2.append([day.day.isoformat()] + [round(float(v), 4) for v in day.Ga])
+
+    ws3 = wb.create_sheet("充放电量")
+    ws3.append(["日期"] + CHARGE_COLUMNS + ["0:00 储电量", "24:00 储电量"])
+    for day in days:
+        charge, discharge = interval_sums(day.C), interval_sums(day.D)
+        row: list = [day.day.isoformat()]
+        for ch, dis in zip(charge, discharge):
+            row += [round(float(ch), 4), round(float(dis), 4)]
+        row += [round(float(day.soc_start), 4), round(float(np.asarray(day.S)[-1]), 4)]
+        ws3.append(row)
+
+    ws4 = wb.create_sheet("紧急购电量")
+    ws4.append(["日期", "紧急购电时间段", "紧急购电量"])
+    for day in days:
+        first = True
+        for label, kwh in emergency_intervals(day.day, day.E):
+            ws4.append([day.day.isoformat() if first else None, label, round(float(kwh), 4)])
+            first = False
+
+    wb.save(path)
+    return path
+
+
+def variant_table(rows: Sequence[dict]) -> str:
+    """变体对比表：每行一个 `--issues` 子集。"""
+    head = (
+        f"{'预报时刻':<16} {'全年总费用':>15} {'计划费':>15} {'减购违约费':>13}"
+        f" {'增购费':>13} {'紧急费':>13} {'紧急购电kWh':>13} {'平均调整量':>11}"
+    )
+    lines = [head]
+    for r in rows:
+        lines.append(
+            f"{r['label']:<16} {r['total_cost']:>15.2f} {r['plan_cost']:>15.2f}"
+            f" {r['curtail_cost']:>13.2f} {r['extra_cost']:>13.2f}"
+            f" {r['emergency_cost']:>13.2f} {r['emergency_kwh']:>13.2f}"
+            f" {r['mean_adjust_kwh']:>11.2f}"
+        )
+    return "\n".join(lines)

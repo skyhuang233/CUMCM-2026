@@ -31,6 +31,7 @@ from .data import (
 )
 from .executor import DayExecution, run_day
 from .forecast import PointForecaster
+from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .optimizer import StorageRollingSolver, solve_saa
 from .results import print_day_summary, summarize_day, write_result2
 from .scenarios import M_SCEN, ResidualLibrary
@@ -68,6 +69,7 @@ class DayResult:
     plan_cost: float
     emergency_cost: float
     point_solution: object | None = None  # 点预测解，仅供论文对照
+    price: np.ndarray | None = None  # 该日结算电价（None = 附件 1 常数电价）
 
     @property
     def total_cost(self) -> float:
@@ -157,38 +159,48 @@ def run_period(
     soc_init: float = SOC_INIT,
     progress: int = 0,
     point_days: set[date] | None = None,
+    price_source: PriceSource | None = None,
 ) -> PeriodResult:
     """从 start 到 end 逐日 walk-forward 回测；只记录 record_from 起的日子。
 
     `point_days` 中的日期额外求一次点预测解（M=1、残差为零的 48h 确定性 LP），
     只挂在结果上供论文对照，不参与执行。
+
+    `price_source` 缺省为附件 1 的常数电价（问 2 本体）；问 4 传入附件 4 的电价预测器，
+    此时每天的电价曲线来自决策时刻的点预测、场景带电价残差、结算与执行用真值。
     """
     record_from = start if record_from is None else record_from
     point_days = point_days or set()
-    price_h = np.tile(bundle.att1.price, params.horizon_days)
-    n_future = T * (params.horizon_days - 1)
+    ps: PriceSource = price_source or ConstantPriceSource(bundle.att1.price)
+    n_days = params.horizon_days
+    n_future = T * (n_days - 1)
+    price_h0 = horizon_price(ps, start, 0, n_days)
 
     forecaster = PointForecaster(
         bundle.daily, bundle.att1, k_load=params.k_load, k_pv=params.k_pv
     )
     library = ResidualLibrary()
-    solver = StorageRollingSolver(price_h, n_today=T)
+    solver = StorageRollingSolver(price_h0, n_today=T)
 
     # 起始日之前的历史也要入库，否则场景层要等到区间中段才有残差可用。
     for d in daterange(bundle.daily.dates[0], start - timedelta(days=1)):
         load_pred, pv_pred = forecaster.predict(d)
         load_true, pv_true = bundle.truth(d)
-        library.update(d, load_true, pv_true, load_pred, pv_pred)
+        library.update(d, load_true, pv_true, load_pred, pv_pred, ps.residual(d, 0))
 
     out = PeriodResult(soc_end=float(soc_init))
     soc = float(soc_init)
     t_start = time.perf_counter()
     for i, d in enumerate(daterange(start, end)):
         load_pred, pv_pred = forecaster.predict(d)
-        load_future, pv_future = forecaster.predict_future(d, params.horizon_days - 1)
+        load_future, pv_future = forecaster.predict_future(d, n_days - 1)
         assert load_future.size == n_future
 
+        price_h = price_h0 if not ps.varies else horizon_price(ps, d, 0, n_days)
         L_scen, PV_scen = library.scenarios(d, load_pred, pv_pred, params.m_scen)
+        price_scen = library.price_scenarios(
+            d, price_h[:T], price_h[T:], params.m_scen
+        )
         saa = solve_saa(
             price_h,
             L_scen,
@@ -198,10 +210,14 @@ def run_period(
             soc,
             n_today=T,
             with_point=d in point_days,
+            price_scen=price_scen,
         )
         g0 = np.maximum(saa.G0, 0.0)
 
         load_true, pv_true = bundle.truth(d)
+        price_fn = None
+        if ps.varies:
+            price_fn = lambda t, day=d: horizon_price(ps, day, t + 1, n_days)  # noqa: E731
         execution: DayExecution = run_day(
             d,
             g0,
@@ -214,8 +230,10 @@ def run_period(
             pv_future,
             solver,
             step_minutes=params.step_minutes,
+            price_fn=price_fn,
         )
-        plan_cost, emergency_cost = cost_q2(bundle.att1.price, g0, execution.E)
+        price_true = ps.truth(d)
+        plan_cost, emergency_cost = cost_q2(price_true, g0, execution.E)
         if d >= record_from:
             out.days.append(
                 DayResult(
@@ -230,9 +248,10 @@ def run_period(
                     plan_cost=plan_cost,
                     emergency_cost=emergency_cost,
                     point_solution=saa.point_solution,
+                    price=price_true if ps.varies else None,
                 )
             )
-        library.update(d, load_true, pv_true, load_pred, pv_pred)
+        library.update(d, load_true, pv_true, load_pred, pv_pred, ps.residual(d, 0))
         soc = execution.soc_end
         if progress and (i + 1) % progress == 0:
             print(
@@ -248,12 +267,13 @@ def run_period(
 
 def validate(res: PeriodResult, bundle: Bundle) -> None:
     """回测结束后复核全部不变量：平衡、无同时充放电、SOC 界与跨日连续、费用分解。"""
-    price = np.asarray(bundle.att1.price, dtype=float)
+    default_price = np.asarray(bundle.att1.price, dtype=float)
     for prev, cur in zip(res.days, res.days[1:]):
         assert (cur.day - prev.day).days != 1 or abs(cur.soc_start - prev.soc_end) < 1e-9, (
             f"{cur.day} 的 0:00 储电量与前一日 24:00 不连续"
         )
     for day in res.days:
+        price = default_price if day.price is None else np.asarray(day.price, dtype=float)
         assert np.minimum(day.E, day.W).max() < 1e-9, f"{day.day} 存在 E_t·W_t ≠ 0"
         assert np.minimum(day.C, day.D).max() < 1e-6, f"{day.day} 存在同时充放电"
         assert day.S.min() >= SOC_MIN - 1e-6 and day.S.max() <= SOC_MAX + 1e-6

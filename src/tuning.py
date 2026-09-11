@@ -29,6 +29,7 @@ JAN_END = date(2025, 1, 31)
 JAN_SCORE_FROM = date(2025, 1, 8)  # 1 月 1–7 日为冷启动，不计入选参得分
 K_LOAD_GRID = (2, 3, 4, 5, 6)
 K_PV_GRID = (3, 4, 5, 6, 7)
+KP_GRID = (2, 3, 4, 6, 8)  # 问 4 的电价基准窗口 $K_p$
 M_GRID = (6, 12, 20)
 HORIZON_GRID = (1, 2, 3)  # 24h / 48h / 72h
 
@@ -144,6 +145,104 @@ def select_k(
     result = TuningResult(
         k_load=best.k_load,
         k_pv=best.k_pv,
+        cost=best.cost,
+        score_from=score_from,
+        score_end=end,
+        candidates=candidates,
+    )
+    if verbose:
+        print(f"\n{result.table()}\n", flush=True)
+    return result
+
+
+@dataclass
+class KpCandidate:
+    """一个 $K_p$ 候选在计分窗口内的费用（用附件 4 真值结算）。"""
+
+    k_price: int
+    cost: float
+    plan_cost: float
+    emergency_cost: float
+    emergency_kwh: float
+    cost_full: float = 0.0
+    runtime_s: float = 0.0
+
+
+@dataclass
+class KpResult:
+    """`select_kp` 的输出：最优 $K_p$ + 全部候选。"""
+
+    k_price: int
+    cost: float
+    score_from: date = JAN_SCORE_FROM
+    score_end: date = JAN_END
+    candidates: list[KpCandidate] = field(default_factory=list)
+
+    @property
+    def window(self) -> str:
+        return f"{self.score_from.isoformat()}→{self.score_end.isoformat()}"
+
+    def table(self) -> str:
+        lines = [
+            f"计分窗口 {self.window}（1 月 1 日起预热，冷启动日不计分）",
+            f"{'K_p':>4} {'窗口总费用':>14} {'计划费':>14} {'紧急费':>12}"
+            f" {'紧急购电kWh':>13} {'整月总费用':>14}",
+        ]
+        for c in sorted(self.candidates, key=lambda c: c.cost):
+            lines.append(
+                f"{c.k_price:>4} {c.cost:>14.2f} {c.plan_cost:>14.2f}"
+                f" {c.emergency_cost:>12.2f} {c.emergency_kwh:>13.2f} {c.cost_full:>14.2f}"
+            )
+        return "\n".join(lines)
+
+
+def select_kp(
+    bundle: Bundle,
+    att4: tuple[list[date], np.ndarray],
+    k_grid=KP_GRID,
+    *,
+    base: Params | None = None,
+    end: date = JAN_END,
+    score_from: date = JAN_SCORE_FROM,
+    verbose: bool = True,
+) -> KpResult:
+    """1 月按问 4-2 管线选电价基准窗口 $K_p$，判据与 `select_k` 相同。
+
+    $K_L, K_P$ 沿用问 2 选定值（由 `base` 传入），只有电价预测器的 $K_p$ 变化；
+    得分是计分窗口内用附件 4 真值结算的实际总费用（计划费 + 紧急费）。
+    """
+    from .forecast_price import PriceForecaster
+
+    base = base or Params()
+    dates, prices = att4
+    candidates: list[KpCandidate] = []
+    for kp in k_grid:
+        t0 = time.perf_counter()
+        source = PriceForecaster(dates, prices, bundle.att1, k=kp)
+        res = run_period(
+            WARMUP_START, end, base, bundle, soc_init=SOC_INIT, price_source=source
+        )
+        plan_cost, emergency_cost, emergency_kwh = _score(res, score_from)
+        cand = KpCandidate(
+            k_price=kp,
+            cost=plan_cost + emergency_cost,
+            plan_cost=plan_cost,
+            emergency_cost=emergency_cost,
+            emergency_kwh=emergency_kwh,
+            cost_full=res.total_cost,
+            runtime_s=time.perf_counter() - t0,
+        )
+        candidates.append(cand)
+        if verbose:
+            print(
+                f"  K_p={kp}: 窗口总费用 {cand.cost:12.2f} 元"
+                f"（紧急 {cand.emergency_cost:.2f}；整月 {cand.cost_full:.2f}，"
+                f"{cand.runtime_s:.1f}s）",
+                flush=True,
+            )
+    best = min(candidates, key=lambda c: c.cost)
+    result = KpResult(
+        k_price=best.k_price,
         cost=best.cost,
         score_from=score_from,
         score_end=end,

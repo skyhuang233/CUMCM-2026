@@ -130,3 +130,32 @@ def test_issue_set_must_contain_midnight(bundle):
             Params(step_minutes=60, issues=(6, 12)),
             bundle,
         )
+
+
+def test_no_future_data_reaches_any_decision(bundle):
+    """把末日之后的真值与预报全部毒化成 NaN：$G^0$、$G^a$ 与费用必须逐位不变。"""
+    from src.data import DailySeries
+
+    d0, d1 = date(2025, 1, 1), date(2025, 1, 3)
+    params = Params(step_minutes=60)
+    clean = run_period(d0, d1, params, bundle, soc_init=SOC_INIT)
+
+    i = bundle.daily.dates.index(d1)
+    load = bundle.daily.load_kwh.copy()
+    pv = bundle.daily.pv_kwh.copy()
+    load[i + 1 :] = np.nan
+    pv[i + 1 :] = np.nan
+    att3 = {
+        k: (v if k[0] <= d1 else np.full(24, np.nan)) for k, v in bundle.att3.items()
+    }
+    poisoned = type(bundle)(
+        att1=bundle.att1,
+        daily=DailySeries(dates=bundle.daily.dates, load_kwh=load, pv_kwh=pv),
+        att3=att3,
+    )
+    guarded = run_period(d0, d1, params, poisoned, soc_init=SOC_INIT)
+
+    for a, b in zip(clean.days, guarded.days):
+        assert np.array_equal(a.G0, b.G0)
+        assert np.array_equal(a.Ga, b.Ga)
+    assert clean.total_cost == guarded.total_cost

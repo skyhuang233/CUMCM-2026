@@ -37,6 +37,7 @@ from .data import (
 )
 from .executor import DayExecution, run_day
 from .forecast import PointForecaster
+from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .forecast_pv import ISSUE_HOURS, PVIssueForecaster, issue_segment
 from .optimizer import StorageRollingSolver, solve_readjust, solve_saa
 from .results import print_day_summary_q3, summarize_day_q3, variant_table, write_result3
@@ -79,6 +80,8 @@ class DayResult:
     curtail_cost: float
     extra_cost: float
     emergency_cost: float
+    plan_only_cost: float = 0.0  # Σ p·G⁰，「不调整」的假想购电费
+    price: np.ndarray | None = None  # 该日结算电价（None = 附件 1 常数电价）
 
     @property
     def total_cost(self) -> float:
@@ -130,6 +133,20 @@ class PeriodResult:
         return float(sum(float(d.G0.sum()) for d in self.days))
 
     @property
+    def plan_only_cost(self) -> float:
+        """假想的「不调整」购电费 Σ p·G⁰，用作调整净费用的基准。"""
+        return self._sum("plan_only_cost")
+
+    @property
+    def adjust_net_cost(self) -> float:
+        """调整相关净费用 =（计划费 + 减购违约费 + 增购费）− Σ p·G⁰。
+
+        减购时每 kWh 净省 0.5p、增购时每 kWh 净付 1.5p；储能充裕时前者常占优，
+        因此这个数可能为负（是预期结果，不是错误）。
+        """
+        return self.plan_cost + self.curtail_cost + self.extra_cost - self.plan_only_cost
+
+    @property
     def purchase_kwh(self) -> float:
         return float(sum(float(d.Ga.sum()) for d in self.days))
 
@@ -164,6 +181,7 @@ class PeriodResult:
             "emergency_cost": self.emergency_cost,
             "emergency_kwh": self.emergency_kwh,
             "mean_adjust_kwh": self.mean_adjust_kwh,
+            "adjust_net_cost": self.adjust_net_cost,
         }
 
 
@@ -212,31 +230,38 @@ def run_period(
     record_from: date | None = None,
     soc_init: float = SOC_INIT,
     progress: int = 0,
+    price_source: PriceSource | None = None,
 ) -> PeriodResult:
-    """从 start 到 end 逐日 walk-forward 回测；只记录 record_from 起的日子。"""
+    """从 start 到 end 逐日 walk-forward 回测；只记录 record_from 起的日子。
+
+    `price_source` 缺省为附件 1 的常数电价（问 3 本体）；问 4 传入附件 4 的电价预测器，
+    此时每个预报时刻同时刷新光伏预报与电价的日水平因子 $\\lambda$。
+    """
     record_from = start if record_from is None else record_from
     issues = tuple(sorted(set(int(h) for h in params.issues)))
     assert issues and issues[0] == 0, "预报时刻集合必须包含 0:00（计划购电由它决定）"
     assert all(h in ISSUE_HOURS for h in issues), f"预报时刻只能取自 {ISSUE_HOURS}"
     blocks = block_bounds_of(issues)
 
-    price = np.asarray(bundle.att1.price, dtype=float)
-    price48 = np.tile(price, 2)
+    ps: PriceSource = price_source or ConstantPriceSource(bundle.att1.price)
+    price48_0 = horizon_price(ps, start, 0, 2)
     forecaster = PointForecaster(
         bundle.daily, bundle.att1, k_load=params.k_load, k_pv=params.k_pv
     )
     pv_fc = PVIssueForecaster(bundle.daily, bundle.att3)
     library = ResidualLibrary()
     pv_lib = PVResidualLibraryByIssue(library)
-    solver = StorageRollingSolver(price48, n_today=T)
+    solver = StorageRollingSolver(price48_0, n_today=T)
 
     def learn(d: date) -> None:
-        """把日期 d 的残差入库：负载沿用问 2 的库，光伏按发布时刻分库。"""
+        """把日期 d 的残差入库：负载沿用问 2 的库，光伏与电价按发布时刻分库。"""
         load_pred, pv_pred = forecaster.predict(d)
         load_true, pv_true = bundle.truth(d)
-        library.update(d, load_true, pv_true, load_pred, pv_pred)
+        library.update(d, load_true, pv_true, load_pred, pv_pred, ps.residual(d, 0))
         for h0 in issues:
-            pv_lib.update(d, h0, pv_fc.residual(d, h0))
+            pv_lib.update(
+                d, h0, pv_fc.residual(d, h0), ps.residual(d, issue_segment(h0))
+            )
 
     # 起始日之前的历史也要入库，否则场景层要等到区间中段才有残差可用。
     for d in daterange(bundle.daily.dates[0], start - timedelta(days=1)):
@@ -249,11 +274,28 @@ def run_period(
         load_pred, _ = forecaster.predict(d)
         load_next, pv_mean_next = forecaster.predict_next(d)
         load_true, pv_true = bundle.truth(d)
+        price = ps.truth(d)
+        price48 = price48_0 if not ps.varies else horizon_price(ps, d, 0, 2)
+        price_fn = None
+        if ps.varies:
+            price_fn = lambda t, day=d: horizon_price(ps, day, t + 1, 2)  # noqa: E731
 
         # 0:00：附件 3 的 0:00 预报 + 0:00 残差库 → SAA 冻结计划购电量
         pv_today, pv_next = pv_fc.curves(d, 0, pv_mean_next)
         L_scen, PV_scen = pv_lib.scenarios(d, 0, load_pred, pv_today, params.m_scen)
-        saa = solve_saa(price48, L_scen, PV_scen, load_next, pv_next, soc, n_today=T)
+        price_scen = pv_lib.price_scenarios(
+            d, 0, price48[:T], price48[T:], params.m_scen
+        )
+        saa = solve_saa(
+            price48,
+            L_scen,
+            PV_scen,
+            load_next,
+            pv_next,
+            soc,
+            n_today=T,
+            price_scen=price_scen,
+        )
         G0 = np.maximum(saa.G0, 0.0)
         Ga = G0.copy()  # 每段唯一的提交值；0:00–6:00 段恒等于 G^0
         g_cur = G0.copy()  # 滚动 LP 用：已提交段取 G^a，未提交段取 G^0
@@ -266,8 +308,24 @@ def run_period(
                 L_s, PV_s = pv_lib.scenarios(
                     d, h0, load_pred[t0:], pv_today[t0:], params.m_scen
                 )
+                # 重优化同时刷新光伏预报与电价的日水平因子（当天已观测段的最小二乘）
+                price48_h = price48 if not ps.varies else horizon_price(ps, d, t0, 2)
+                price_s = pv_lib.price_scenarios(
+                    d, h0, price48_h[t0:T], price48_h[T:], params.m_scen
+                )
+                if price_s is not None:  # 场景电价按 price48 的整日约定补齐 $t<t_0$ 段
+                    head = np.tile(price48_h[:t0], (price_s.shape[0], 1))
+                    price_s = np.concatenate([head, price_s], axis=1)
                 rj = solve_readjust(
-                    t0, price48, G0, L_s, PV_s, load_next, pv_next, soc_block
+                    t0,
+                    price48_h,
+                    G0,
+                    L_s,
+                    PV_s,
+                    load_next,
+                    pv_next,
+                    soc_block,
+                    price_scen=price_s,
                 )
                 Ga[t0:t1] = rj.Ga[t0:t1]  # 只提交到下一预报时刻，其余为临时决策
                 g_cur[t0:t1] = Ga[t0:t1]
@@ -286,6 +344,7 @@ def run_period(
                 t_start=t0,
                 t_end=t1,
                 out=execution,
+                price_fn=price_fn,
             )
             soc_block = float(execution.S[t1 - 1])
 
@@ -306,6 +365,8 @@ def run_period(
                     curtail_cost=cost["curtail_penalty"],
                     extra_cost=cost["extra"],
                     emergency_cost=cost["emergency"],
+                    plan_only_cost=float(price @ G0),
+                    price=price if ps.varies else None,
                 )
             )
         learn(d)
@@ -324,13 +385,14 @@ def run_period(
 
 def validate(res: PeriodResult, bundle: Bundle, issues: tuple[int, ...]) -> None:
     """复核全部不变量：提交规则、平衡、SOC 界与跨日连续、四项费用分解。"""
-    price = np.asarray(bundle.att1.price, dtype=float)
+    default_price = np.asarray(bundle.att1.price, dtype=float)
     first_block_end = block_bounds_of(tuple(sorted(set(issues))))[0][2]
     for prev, cur in zip(res.days, res.days[1:]):
         assert (cur.day - prev.day).days != 1 or abs(cur.soc_start - prev.soc_end) < 1e-9, (
             f"{cur.day} 的 0:00 储电量与前一日 24:00 不连续"
         )
     for day in res.days:
+        price = default_price if day.price is None else np.asarray(day.price, dtype=float)
         assert day.Ga.shape == (T,) and day.G0.shape == (T,)
         assert day.Ga.min() >= -1e-9, f"{day.day} 出现负的调整购电量"
         assert np.abs(day.Ga[:first_block_end] - day.G0[:first_block_end]).max() < 1e-9, (
@@ -357,7 +419,6 @@ def validate(res: PeriodResult, bundle: Bundle, issues: tuple[int, ...]) -> None
 
 def print_period_summary(res: PeriodResult, label: str = "全年") -> None:
     share = 100.0 * res.emergency_kwh / res.plan_kwh if res.plan_kwh else 0.0
-    net = res.curtail_cost + res.extra_cost
     print(f"—— {label}汇总（{len(res.days)} 天，预报时刻 {res.label}）——")
     print(f"  总费用        {res.total_cost:14.2f} 元")
     print(f"    计划费      {res.plan_cost:14.2f} 元  = Σ p·min(G⁰,Gᵃ)")
@@ -368,7 +429,11 @@ def print_period_summary(res: PeriodResult, label: str = "全年") -> None:
     print(f"  实际购电量    {res.purchase_kwh:14.2f} kWh（Σ Gᵃ）")
     print(f"  紧急购电量    {res.emergency_kwh:14.2f} kWh（占计划购电量 {share:.3f}%）")
     print(f"  平均每段调整量{res.mean_adjust_kwh:14.2f} kWh")
-    print(f"  调整相关净费用{net:14.2f} 元（减购违约 + 增购 − 被取消的计划费已在计划费中扣除）")
+    print(
+        f"  调整相关净费用{res.adjust_net_cost:14.2f} 元"
+        f"（购电侧 {res.plan_cost + res.curtail_cost + res.extra_cost:.2f}"
+        f" − 不调整基准 Σp·G⁰ {res.plan_only_cost:.2f}）"
+    )
     print(f"  发生紧急购电的天数  {res.emergency_days} / {len(res.days)}")
     print(f"  24:00 储电量均值    {np.mean([d.soc_end for d in res.days]):.2f} kWh")
 
@@ -422,7 +487,7 @@ def main(argv: list[str] | None = None) -> PeriodResult:
             f"{picked.window} 总费用 {picked.cost:.2f} 元\n"
         )
     else:
-        source = "命令行指定" if (args.k_load or args.k_pv) else f"问 2 选定值（--skip-tuning）"
+        source = "命令行指定" if (args.k_load or args.k_pv) else "问 2 选定值（--skip-tuning）"
         print(f"使用参数 K_L={params.k_load}, K_P={params.k_pv}（{source}）\n")
 
     variants = VARIANTS if args.variants else [tuple(params.issues)]

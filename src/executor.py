@@ -3,12 +3,15 @@
 每段开始时用当前储电量、该段真值与剩余时域点预测求解储能滚动 LP，只执行首段的
 充放电；紧急购电量与富余电量由该段真值下的平衡式反解，因此恒有 E_t·W_t = 0。
 `step_minutes` > 10 时每 k = step_minutes/10 段重解一次，并执行该解的前 k 段。
+`t_start`/`t_end` 让一天可以分段执行：问 3 在 0/36/72/108 处暂停，重优化后带着
+当前储电量与更新过的购电量数组续跑同一天。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Callable
 
 import numpy as np
 
@@ -65,11 +68,14 @@ def run_day(
     t_start: int = 0,
     t_end: int | None = None,
     out: DayExecution | None = None,
+    price_fn: Callable[[int], np.ndarray] | None = None,
 ) -> DayExecution:
     """执行日期 d 的段区间 `[t_start, t_end)`（默认整天），返回逐段执行值。
 
     `soc_init` 是区间起点前的储电量 $S_{t_{start}-1}$；`out` 给出时就地写入该区间，
     使问 3 能在 0/36/72/108 处暂停、重优化后带着当前 SOC 续跑同一天。
+    `price_fn(t)` 给出段 t 开始时可得的 48h 电价向量（问 4 的波动电价），缺省沿用
+    滚动 LP 构造时的电价。
     """
     g_today = np.asarray(g_today, dtype=float)
     load_true = np.asarray(load_true, dtype=float)
@@ -93,6 +99,7 @@ def run_day(
             load_future,
             pv_future,
             g_today,
+            None if price_fn is None else price_fn(t),
         )
         for tau in range(t, min(t + k, t_end)):
             c = float(step.C[tau])

@@ -35,11 +35,12 @@ from .data import (
     load_attachment2,
     load_attachment3,
 )
-from .executor import DayExecution, run_day
+from .executor import DayExecution, run_day, DPValueExecutor
+from .value_dp import next_day_value, future_cost, evaluate_plan
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .forecast_pv import ISSUE_HOURS, PVIssueForecaster, issue_segment
-from .optimizer import StorageRollingSolver, solve_readjust, solve_saa
+from .optimizer import StorageRollingSolver, solve_readjust, solve_saa, solve_saa_point
 from .results import print_day_summary_q3, summarize_day_q3, variant_table, write_result3
 from .run_q2 import PERIOD_END, RECORD_START, WARMUP_START, daterange
 from .scenarios import M_SCEN, PVResidualLibraryByIssue, ResidualLibrary
@@ -80,6 +81,7 @@ class DayResult:
     curtail_cost: float
     extra_cost: float
     emergency_cost: float
+    R: np.ndarray | None = None
     plan_only_cost: float = 0.0  # Σ p·G⁰，「不调整」的假想购电费
     price: np.ndarray | None = None  # 该日结算电价（None = 附件 1 常数电价）
 
@@ -296,13 +298,35 @@ def run_period(
             n_today=T,
             price_scen=price_scen,
         )
-        G0 = np.maximum(saa.G0, 0.0)
+        # 0:00 与后续重优化块同样从场景解、点预测解的五个凸组合中
+        # 选取 DP 回放费用最低的计划，之后才冻结为 G^0。
+        point0 = solve_saa_point(
+            price48, load_pred, pv_today, load_next, pv_next, soc, n_today=T
+        )
+        g_s0 = np.maximum(saa.G0, 0.0)
+        g_d0 = np.maximum(point0.G[:T], 0.0)
+        terminal0 = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
+        p0_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
+        G0 = min(
+            [(1.0 - a) * g_s0 + a * g_d0 for a in (0.0, 0.25, 0.5, 0.75, 1.0)],
+            key=lambda g: evaluate_plan(
+                g,
+                L_scen,
+                PV_scen,
+                price48[:T],
+                soc,
+                terminal0,
+                price_scen=p0_scen,
+            ),
+        )
         Ga = G0.copy()  # 每段唯一的提交值；0:00–6:00 段恒等于 G^0
         g_cur = G0.copy()  # 滚动 LP 用：已提交段取 G^a，未提交段取 G^0
 
         execution = DayExecution.empty(d, soc)
         soc_block = soc
+        g_temp = G0.copy()
         for h0, t0, t1 in blocks:
+            price_s = price_scen
             if h0:
                 pv_today, pv_next = pv_fc.curves(d, h0, pv_mean_next)
                 L_s, PV_s = pv_lib.scenarios(
@@ -327,8 +351,43 @@ def run_period(
                     soc_block,
                     price_scen=price_s,
                 )
-                Ga[t0:t1] = rj.Ga[t0:t1]  # 只提交到下一预报时刻，其余为临时决策
+                rj_point = solve_readjust(
+                    t0,
+                    price48_h,
+                    G0,
+                    load_pred[t0:][None, :],
+                    pv_today[t0:][None, :],
+                    load_next,
+                    pv_next,
+                    soc_block,
+                )
+                vnext = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
+                p_eval = np.asarray(price48_h[t0:T], float)
+                ps_eval = None if price_s is None else np.asarray(price_s[:, t0:T], float)
+                cand = [
+                    (1.0 - a) * rj.Ga[t0:] + a * rj_point.Ga[t0:]
+                    for a in (0.0, 0.25, 0.5, 0.75, 1.0)
+                ]
+                chosen = min(
+                    cand,
+                    key=lambda g: evaluate_plan(
+                        g, L_s, PV_s, p_eval, soc_block, vnext,
+                        price_scen=ps_eval, base_plan=G0[t0:]
+                    ),
+                )
+                rj.Ga[t0:] = chosen
+                Ga[t0:t1] = chosen[: t1 - t0]  # 只提交到下一预报时刻，其余为临时决策
                 g_cur[t0:t1] = Ga[t0:t1]
+                g_temp[t0:] = rj.Ga[t0:]
+            # 每次重优化后从当前时刻重算未来费用函数，并用 DP 价值执行器逐段执行。
+            p_rem = np.asarray(price48_h if h0 else price48, float)[t0:T]
+            Lr = np.asarray(L_s if h0 else L_scen, float)
+            PVr = np.asarray(PV_s if h0 else PV_scen, float)
+            gr = np.asarray(g_temp[t0:T], float)
+            p_rem_scen = None if price_s is None else np.asarray(price_s[:, t0:T], float)
+            vnext = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
+            hbar = future_cost(p_rem if p_rem_scen is None else p_rem_scen, Lr, PVr, gr, vnext)
+            dp_executor = DPValueExecutor(hbar, price=p_rem).prepare(t0)
             run_day(
                 d,
                 g_cur,
@@ -339,7 +398,7 @@ def run_period(
                 pv_today,
                 load_next,
                 pv_next,
-                solver,
+                dp_executor,
                 step_minutes=params.step_minutes,
                 t_start=t0,
                 t_end=t1,
@@ -360,6 +419,7 @@ def run_period(
                     S=execution.S,
                     E=execution.E,
                     W=execution.W,
+                    R=execution.R,
                     soc_start=execution.soc_start,
                     plan_cost=cost["plan"],
                     curtail_cost=cost["curtail_penalty"],

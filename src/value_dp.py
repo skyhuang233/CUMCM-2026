@@ -181,8 +181,13 @@ def reserve_level(h_next, price, *, lo=SOC_MIN, hi=SOC_MAX):
     m=np.nanmin(vals[(z>=lo)&(z<=hi)]); return float(z[np.flatnonzero(vals<=m+1e-8)[-1]])
 
 
-def evaluate_plan(g_plan, load_scen, pv_scen, price, soc_init, terminal_value=None, *, price_scen=None, base_plan=None):
-    """按 DP 规则评估候选购电计划，返回平均（计划+紧急+终端）费用。"""
+def evaluate_plan(g_plan, load_scen, pv_scen, price, soc_init, terminal_value=None, *, price_scen=None, base_plan=None, return_hbar=False):
+    """按 DP 规则评估候选购电计划。
+
+    ``return_hbar=True`` additionally returns the future-cost functions used
+    by the replay.  The selected candidate can therefore be executed without
+    paying for an identical second backward DP pass.
+    """
     p=np.asarray(price,float); G=np.asarray(g_plan,float); L=np.atleast_2d(load_scen); PV=np.atleast_2d(pv_scen)
     ps = np.asarray(price_scen,float) if price_scen is not None else np.tile(p[None, :], (L.shape[0], 1))
     if ps.ndim == 1: ps = np.tile(ps[None, :], (L.shape[0], 1))
@@ -203,7 +208,8 @@ def evaluate_plan(g_plan, load_scen, pv_scen, price, soc_init, terminal_value=No
         if base is None: cst=float(plan_price @ G)
         else: cst=float(plan_price @ np.minimum(base,G) + 0.5*plan_price @ np.maximum(base-G,0) + 1.5*plan_price @ np.maximum(G-base,0))
         total.append(cst+em+float(tv(np.array([s]))[0]))
-    return float(np.mean(total))
+    score = float(np.mean(total))
+    return (score, hbar) if return_hbar else score
 
 
 __all__=["ConvexPiecewiseLinear","average_functions","lower_envelope","next_day_value","periodic_value","future_cost","reserve_level","evaluate_plan"]

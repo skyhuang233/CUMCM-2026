@@ -36,11 +36,11 @@ from .data import (
     load_attachment3,
 )
 from .executor import DayExecution, run_day, DPValueExecutor
-from .value_dp import next_day_value, future_cost, evaluate_plan
+from .value_dp import next_day_value, evaluate_plan
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .forecast_pv import ISSUE_HOURS, PVIssueForecaster, issue_segment
-from .optimizer import StorageRollingSolver, solve_readjust, solve_saa, solve_saa_point
+from .optimizer import solve_readjust, solve_saa, solve_saa_point
 from .results import print_day_summary_q3, summarize_day_q3, variant_table, write_result3
 from .run_q2 import PERIOD_END, RECORD_START, WARMUP_START, daterange
 from .scenarios import M_SCEN, PVResidualLibraryByIssue, ResidualLibrary
@@ -60,6 +60,8 @@ class Params:
     k_load: int = K_LOAD
     k_pv: int = K_PV  # 只用于次日均值曲线与预报未覆盖的段
     m_scen: int = M_SCEN
+    # Kept for legacy StorageRollingSolver experiments only; DP is always
+    # executed at each native 10-minute segment.
     step_minutes: int = 10
     issues: tuple[int, ...] = ISSUE_HOURS
 
@@ -253,7 +255,6 @@ def run_period(
     pv_fc = PVIssueForecaster(bundle.daily, bundle.att3)
     library = ResidualLibrary()
     pv_lib = PVResidualLibraryByIssue(library)
-    solver = StorageRollingSolver(price48_0, n_today=T)
 
     def learn(d: date) -> None:
         """把日期 d 的残差入库：负载沿用问 2 的库，光伏与电价按发布时刻分库。"""
@@ -278,9 +279,17 @@ def run_period(
         load_true, pv_true = bundle.truth(d)
         price = ps.truth(d)
         price48 = price48_0 if not ps.varies else horizon_price(ps, d, 0, 2)
-        price_fn = None
-        if ps.varies:
-            price_fn = lambda t, day=d: horizon_price(ps, day, t + 1, 2)  # noqa: E731
+        # Execution needs only the realised scalar price, not a newly-built
+        # 48-hour forecast vector every ten minutes.
+        price_fn = (lambda t, p=price: float(p[t])) if ps.varies else None
+        value_cache: dict[tuple[bytes, bytes, bytes], object] = {}
+
+        def next_value(price_next: np.ndarray, load_next: np.ndarray, pv_next: np.ndarray):
+            p, l, v = (np.ascontiguousarray(x, dtype=float) for x in (price_next, load_next, pv_next))
+            key = (p.tobytes(), l.tobytes(), v.tobytes())
+            if key not in value_cache:
+                value_cache[key] = next_day_value(p, l, v)
+            return value_cache[key]
 
         # 0:00：附件 3 的 0:00 预报 + 0:00 残差库 → SAA 冻结计划购电量
         pv_today, pv_next = pv_fc.curves(d, 0, pv_mean_next)
@@ -305,20 +314,13 @@ def run_period(
         )
         g_s0 = np.maximum(saa.G0, 0.0)
         g_d0 = np.maximum(point0.G[:T], 0.0)
-        terminal0 = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
+        terminal0 = next_value(np.asarray(price48[T:], float), load_next, pv_next)
         p0_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
-        G0 = min(
-            [(1.0 - a) * g_s0 + a * g_d0 for a in (0.0, 0.25, 0.5, 0.75, 1.0)],
-            key=lambda g: evaluate_plan(
-                g,
-                L_scen,
-                PV_scen,
-                price48[:T],
-                soc,
-                terminal0,
-                price_scen=p0_scen,
-            ),
-        )
+        candidates0 = [(1.0 - a) * g_s0 + a * g_d0 for a in (0.0, 0.25, 0.5, 0.75, 1.0)]
+        scored0 = [evaluate_plan(g, L_scen, PV_scen, price48[:T], soc, terminal0,
+                                 price_scen=p0_scen, return_hbar=True) for g in candidates0]
+        winner0 = int(np.argmin([score for score, _ in scored0]))
+        G0, hbar0 = candidates0[winner0], scored0[winner0][1]
         Ga = G0.copy()  # 每段唯一的提交值；0:00–6:00 段恒等于 G^0
         g_cur = G0.copy()  # 滚动 LP 用：已提交段取 G^a，未提交段取 G^0
 
@@ -361,33 +363,26 @@ def run_period(
                     pv_next,
                     soc_block,
                 )
-                vnext = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
+                vnext = next_value(np.asarray(price48_h[T:], float), load_next, pv_next)
                 p_eval = np.asarray(price48_h[t0:T], float)
                 ps_eval = None if price_s is None else np.asarray(price_s[:, t0:T], float)
                 cand = [
                     (1.0 - a) * rj.Ga[t0:] + a * rj_point.Ga[t0:]
                     for a in (0.0, 0.25, 0.5, 0.75, 1.0)
                 ]
-                chosen = min(
-                    cand,
-                    key=lambda g: evaluate_plan(
-                        g, L_s, PV_s, p_eval, soc_block, vnext,
-                        price_scen=ps_eval, base_plan=G0[t0:]
-                    ),
-                )
+                scored = [evaluate_plan(g, L_s, PV_s, p_eval, soc_block, vnext,
+                                         price_scen=ps_eval, base_plan=G0[t0:],
+                                         return_hbar=True) for g in cand]
+                wi = int(np.argmin([score for score, _ in scored]))
+                chosen, hbar_chosen = cand[wi], scored[wi][1]
                 rj.Ga[t0:] = chosen
                 Ga[t0:t1] = chosen[: t1 - t0]  # 只提交到下一预报时刻，其余为临时决策
                 g_cur[t0:t1] = Ga[t0:t1]
                 g_temp[t0:] = rj.Ga[t0:]
             # 每次重优化后从当前时刻重算未来费用函数，并用 DP 价值执行器逐段执行。
-            p_rem = np.asarray(price48_h if h0 else price48, float)[t0:T]
-            Lr = np.asarray(L_s if h0 else L_scen, float)
-            PVr = np.asarray(PV_s if h0 else PV_scen, float)
-            gr = np.asarray(g_temp[t0:T], float)
-            p_rem_scen = None if price_s is None else np.asarray(price_s[:, t0:T], float)
-            vnext = next_day_value(np.asarray(price48[T:], float), load_next, pv_next)
-            hbar = future_cost(p_rem if p_rem_scen is None else p_rem_scen, Lr, PVr, gr, vnext)
-            dp_executor = DPValueExecutor(hbar, price=p_rem).prepare(t0)
+            hbar = hbar0 if h0 == 0 else hbar_chosen
+            price_rem = np.asarray(price48_h if h0 else price48, float)[t0:T]
+            dp_executor = DPValueExecutor(hbar, price=price_rem).prepare(t0)
             run_day(
                 d,
                 g_cur,
@@ -514,7 +509,8 @@ def main(argv: list[str] | None = None) -> PeriodResult:
     parser.add_argument("--k-load", type=int, default=None)
     parser.add_argument("--k-pv", type=int, default=None)
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
-    parser.add_argument("--step-minutes", type=int, default=10)
+    parser.add_argument("--step-minutes", type=int, default=10,
+                        help="仅 legacy 滚动 LP 实验使用；DP 主流程固定 10 分钟")
     parser.add_argument("--issues", type=_parse_issues, default=ISSUE_HOURS,
                         help="可用预报时刻子集，如 0,6,12（必须含 0）")
     parser.add_argument("--variants", action="store_true",

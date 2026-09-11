@@ -69,7 +69,7 @@ def run_day(
     t_start: int = 0,
     t_end: int | None = None,
     out: DayExecution | None = None,
-    price_fn: Callable[[int], np.ndarray] | None = None,
+    price_fn: Callable[[int], float | np.ndarray] | None = None,
 ) -> DayExecution:
     """执行日期 d 的段区间 `[t_start, t_end)`（默认整天），返回逐段执行值。
 
@@ -109,8 +109,19 @@ def run_day(
     while t < t_end:
         if isinstance(solver, DPValueExecutor):
             c0, d0, r0 = solver.step(t, soc, load_true[t], pv_true[t], g_today[t], solver.price_at(t, price_fn))
-            class _Step: pass
-            step = _Step(); step.C = np.zeros(n_seg); step.D = np.zeros(n_seg); step.C[t] = c0; step.D[t] = d0; step.R = r0
+            c = 0.0 if c0 < CLIP_TOL else float(c0)
+            dis = 0.0 if d0 < CLIP_TOL else float(d0)
+            net = load_true[t] + c - g_today[t] - pv_true[t] - dis
+            C[t], D[t] = c, dis
+            E[t], W[t] = max(net, 0.0), max(-net, 0.0)
+            soc += ETA * c - dis / ETA
+            assert SOC_MIN - 1e-6 <= soc <= SOC_MAX + 1e-6, f"{d} 段 {t} 储电量越界：{soc}"
+            soc = min(max(soc, SOC_MIN), SOC_MAX)
+            S[t] = soc
+            if ex.R is not None:
+                ex.R[t] = float(r0)
+            t += 1
+            continue
         else:
             step = solver.solve(
             t,
@@ -156,9 +167,8 @@ class DPValueExecutor:
         return self
     def price_at(self, t, price_fn=None):
         if price_fn is not None:
-            try:
-                a=np.asarray(price_fn(t),float); return float(a[t]) if a.size>t else float(a[0])
-            except Exception: pass
+            a = np.asarray(price_fn(t), float)
+            return float(a) if a.ndim == 0 else float(a[t] if a.size > t else a[0])
         j = t - getattr(self, "t0", 0)
         return float(self.price[j]) if self.price is not None and j < self.price.size else 1.0
     def step(self, t, soc_prev, load, pv, g, price):

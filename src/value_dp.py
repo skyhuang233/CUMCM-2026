@@ -123,6 +123,26 @@ def next_day_value(price, load, pv, *, terminal=None, grid=None):
     return ConvexPiecewiseLinear(g,v)
 
 
+def periodic_value(price, load, pv, soc_init: float = 6000.0, *, grid=None):
+    """Independent DP check for the periodic deterministic problem.
+
+    The terminal indicator is represented on the supplied SOC mesh (the
+    default 5-kWh mesh contains the usual 6000-kWh initial state).  The
+    returned value is the complete value function, so callers can inspect
+    ``value(soc_init)`` as well as its breakpoints/slopes.
+    """
+    g = _grid() if grid is None else np.asarray(grid, float)
+    # A steep absolute penalty is the numerically stable mesh equivalent of a
+    # terminal indicator: unlike literal ``inf`` values it still permits
+    # interpolation when an action lands between SOC nodes.
+    penalty = 1.0e6
+    return next_day_value(
+        price, load, pv,
+        terminal=lambda z: penalty * np.abs(np.asarray(z, float) - float(soc_init)),
+        grid=g,
+    )
+
+
 def future_cost(price, load_scen, pv_scen, g_plan, terminal_value=None, *, grid=None):
     """反向计算每个场景的剩余紧急费用，并返回等权平均折线列表。"""
     p0=np.asarray(price,float)
@@ -186,4 +206,4 @@ def evaluate_plan(g_plan, load_scen, pv_scen, price, soc_init, terminal_value=No
     return float(np.mean(total))
 
 
-__all__=["ConvexPiecewiseLinear","average_functions","lower_envelope","next_day_value","future_cost","reserve_level","evaluate_plan"]
+__all__=["ConvexPiecewiseLinear","average_functions","lower_envelope","next_day_value","periodic_value","future_cost","reserve_level","evaluate_plan"]

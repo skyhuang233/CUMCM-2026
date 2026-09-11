@@ -294,15 +294,25 @@ def write_result3(days: Sequence, path: str = "results/result3.xlsx") -> str:
 def variant_table(rows: Sequence[dict]) -> str:
     """变体对比表：每行一个 `--issues` 子集。"""
     head = (
-        f"{'预报时刻':<16} {'全年总费用':>15} {'计划费':>15} {'减购违约费':>13}"
-        f" {'增购费':>13} {'紧急费':>13} {'紧急购电kWh':>13} {'平均调整量':>11}"
+        f"{'预报时刻':<14} {'全年总费用':>15} {'计划费':>15} {'减购违约费':>12}"
+        f" {'增购费':>12} {'紧急费':>13} {'紧急购电kWh':>13}"
+        f" {'平均调整kWh/段':>13} {'调整净费用':>13}"
     )
     lines = [head]
     for r in rows:
         lines.append(
-            f"{r['label']:<16} {r['total_cost']:>15.2f} {r['plan_cost']:>15.2f}"
-            f" {r['curtail_cost']:>13.2f} {r['extra_cost']:>13.2f}"
+            f"{r['label']:<14} {r['total_cost']:>15.2f} {r['plan_cost']:>15.2f}"
+            f" {r['curtail_cost']:>12.2f} {r['extra_cost']:>12.2f}"
             f" {r['emergency_cost']:>13.2f} {r['emergency_kwh']:>13.2f}"
-            f" {r['mean_adjust_kwh']:>11.2f}"
+            f" {r['mean_adjust_kwh']:>13.2f} {r['adjust_net_cost']:>13.2f}"
         )
+    base = rows[0]["total_cost"] if rows else 0.0
+    if base:
+        lines.append("")
+        lines.append("相对「仅 0:00」变体的总费用变化：")
+        for r in rows:
+            lines.append(
+                f"  {r['label']:<14} {r['total_cost'] - base:>+14.2f} 元"
+                f"（{100.0 * (r['total_cost'] / base - 1.0):>+7.3f}%）"
+            )
     return "\n".join(lines)

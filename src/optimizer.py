@@ -372,6 +372,65 @@ class SAAResult:
     status: str = ""
 
 
+def _scen_price(price_scen: np.ndarray | None, m: int, n_h: int) -> np.ndarray | None:
+    """校验按场景的电价矩阵 (M, n_h)；None 原样返回（确定电价路径）。"""
+    if price_scen is None:
+        return None
+    ps = np.atleast_2d(np.asarray(price_scen, dtype=float))
+    assert ps.shape == (m, n_h), f"price_scen 应为 {(m, n_h)}，实际 {ps.shape}"
+    return ps
+
+
+def _fill_scenario_cost(
+    cost: np.ndarray,
+    struct: SAAStructure,
+    price_h: np.ndarray,
+    ps: np.ndarray | None,
+    eps: float,
+) -> None:
+    """填入第二阶段各场景块的代价：紧急购电 5p/M、次日购电 p/M、吞吐惩罚 eps。
+
+    `ps` 为 None 时全部场景共用 `price_h`（确定电价）；否则场景 ω 用自己的 $p_{\\omega}$。
+    """
+    m, n_h, n_future = struct.m, struct.n_h, struct.n_future
+    for w, block in enumerate(struct.blocks):
+        p_w = price_h if ps is None else ps[w]
+        cost[block["E"] : block["E"] + n_h] = 5.0 * p_w / m
+        cost[block["C"] : block["C"] + n_h] = eps
+        cost[block["D"] : block["D"] + n_h] = eps
+        cost[block["W"] : block["W"] + n_h] = eps
+        if n_future:
+            cost[block["G"] : block["G"] + n_future] = p_w[struct.n_today :] / m
+
+
+def first_stage_price(
+    price_h: np.ndarray, ps: np.ndarray | None, n_first: int
+) -> np.ndarray:
+    """第一阶段（跨场景共享的 $G^0$ 或 $\\Delta^\\pm$）的计价电价。
+
+    确定电价时就是 `price_h[:n_first]`；按场景电价时取场景均价
+    $\\bar p^s_t = \\frac1M\\sum_\\omega p_{\\omega,t}$——因为第一阶段变量跨场景共享，
+    「按场景计费再取期望」与「按均价计一次」完全等价。
+    """
+    if ps is None:
+        return np.asarray(price_h, dtype=float)[:n_first]
+    return ps[:, :n_first].mean(axis=0)
+
+
+def saa_cost_vector(
+    struct: SAAStructure,
+    price_h: np.ndarray,
+    ps: np.ndarray | None,
+    eps: float,
+) -> np.ndarray:
+    """问 2 的 SAA LP 完整代价向量（第一阶段 G0 + 各场景块）。"""
+    cost = np.zeros(struct.n_var)
+    n_today = struct.n_today
+    cost[struct.g0_off : struct.g0_off + n_today] = first_stage_price(price_h, ps, n_today)
+    _fill_scenario_cost(cost, struct, price_h, ps, eps)
+    return cost
+
+
 def _solve_saa_core(
     price_h: np.ndarray,
     L_scen: np.ndarray,
@@ -381,6 +440,7 @@ def _solve_saa_core(
     soc_init: float,
     eps: float,
     n_today: int,
+    price_scen: np.ndarray | None = None,
 ) -> tuple[np.ndarray, SAAStructure, float, str]:
     price_h = np.asarray(price_h, dtype=float)
     L_scen = np.atleast_2d(np.asarray(L_scen, dtype=float))
@@ -395,16 +455,8 @@ def _solve_saa_core(
     assert PV_scen.shape[0] == m
 
     struct = _saa_structure(m, n_today, n_future)
-
-    cost = np.zeros(struct.n_var)
-    cost[struct.g0_off : struct.g0_off + n_today] = price_h[:n_today]
-    for block in struct.blocks:
-        cost[block["E"] : block["E"] + struct.n_h] = 5.0 * price_h / m
-        cost[block["C"] : block["C"] + struct.n_h] = eps
-        cost[block["D"] : block["D"] + struct.n_h] = eps
-        cost[block["W"] : block["W"] + struct.n_h] = eps
-        if n_future:
-            cost[block["G"] : block["G"] + n_future] = price_h[n_today:] / m
+    ps = _scen_price(price_scen, m, struct.n_h)
+    cost = saa_cost_vector(struct, price_h, ps, eps)
 
     net_future = L_future - PV_future
     soc_rhs = np.zeros(struct.n_h)
@@ -439,21 +491,30 @@ def solve_saa(
     *,
     n_today: int = T,
     with_point: bool = False,
+    price_scen: np.ndarray | None = None,
 ) -> SAAResult:
     """0:00 的 SAA 两阶段购电 LP。
 
     第一阶段：当天 G0（跨场景共享）；第二阶段：每场景的 C, D, W, E, S 与次日购电 G。
     目标 = Σ p_t G0_t + (1/M) Σ_ω [Σ_今 5p E + Σ_次日 (pG + 5pE)] + eps Σ_{ω,t}(C+D+W)。
 
+    `price_scen` 给出 (M, price_h.size) 的按场景电价（问 4 的波动电价）时：紧急购电与
+    次日购电按各场景自己的 $p_{\\omega,t}$ 计价，第一阶段 $G^0$ 按场景均价
+    $\\bar p^s_t = \\frac1M\\sum_\\omega p_{\\omega,t}$ 计价（$G^0$ 共享，与按场景计费取期望等价）。
+    缺省 None 时完全退化为单一 `price_h` 的确定电价路径。
+
     `with_point=True` 时另用点预测曲线（M=1、残差为零）解一次同结构 LP，
     返回其充放电与储电量轨迹作为「点预测解」，仅供论文对照，不进入执行。
     """
     x, struct, obj, status = _solve_saa_core(
-        price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today
+        price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today, price_scen
     )
     price_h = np.asarray(price_h, dtype=float)
     G0 = x[struct.g0_off : struct.g0_off + n_today]
-    plan_cost = float(price_h[:n_today] @ G0)
+    plan_price = first_stage_price(
+        price_h, _scen_price(price_scen, struct.m, struct.n_h), n_today
+    )
+    plan_cost = float(plan_price @ G0)
 
     point = None
     if with_point:
@@ -531,6 +592,9 @@ class StorageRollingSolver:
     时域固定为 n_today + n_future 段，等式矩阵、代价向量、基础边界只装配一次；
     每段只更新右端项与边界：段 τ < t 的全部变量被上下界钉成 0（等价于把时域缩短到
     t..末段），SOC 链通过第 0 行的右端项从当前储电量起算。
+
+    问 4 的电价逐段刷新（当段真值 + 剩余段点预测 + 次日曲线），`solve` 的 `price_h`
+    参数只重算代价向量，结构与边界不变；缺省 None 时用构造时的电价。
     """
 
     def __init__(
@@ -547,6 +611,7 @@ class StorageRollingSolver:
         self.n_future = self.n_h - self.n_today
         assert self.n_future >= 0
         self.eta = eta
+        self.eps = eps
 
         self.layout = make_layout(["G", "C", "D", "W", "E", "S"], self.n_h)
         off = self.layout.offsets
@@ -560,6 +625,7 @@ class StorageRollingSolver:
         for name in ("C", "D", "W"):
             cost[off[name] : off[name] + self.n_h] = eps
         self.cost = cost
+        self._cost_scratch = cost.copy()
 
         lb = np.zeros(n_var)
         ub = np.full(n_var, np.inf)
@@ -575,6 +641,17 @@ class StorageRollingSolver:
         self._b_eq = np.zeros(builder.n_row)
         self._net = np.zeros(self.n_h)
 
+    def cost_for(self, price_h: np.ndarray) -> np.ndarray:
+        """按新电价重算代价向量（写入内部缓冲，不改结构与边界）。"""
+        price = np.asarray(price_h, dtype=float)
+        assert price.size == self.n_h, f"电价长度应为 {self.n_h}，实际 {price.size}"
+        off = self.off
+        cost = self._cost_scratch
+        cost[off["G"] : off["G"] + self.n_today] = 0.0
+        cost[off["G"] + self.n_today : off["G"] + self.n_h] = price[self.n_today :]
+        cost[off["E"] : off["E"] + self.n_h] = 5.0 * price
+        return cost
+
     def solve(
         self,
         t: int,
@@ -586,10 +663,16 @@ class StorageRollingSolver:
         load_future: np.ndarray,
         pv_future: np.ndarray,
         g_today: np.ndarray,
+        price_h: np.ndarray | None = None,
     ) -> RollingStep:
-        """段 t 开始时求解：段 t 用真值，t+1..末用点预测，当天购电量固定为 g_today。"""
+        """段 t 开始时求解：段 t 用真值，t+1..末用点预测，当天购电量固定为 g_today。
+
+        `price_h` 给出该段可得的 48h 电价（当段真值 + 剩余段点预测）时按它计价，
+        缺省沿用构造时的电价。
+        """
         n_today, n_h = self.n_today, self.n_h
         off = self.off
+        cost = self.cost if price_h is None else self.cost_for(price_h)
 
         net = self._net
         net[:t] = 0.0
@@ -617,7 +700,7 @@ class StorageRollingSolver:
         bounds[off["G"] + t : off["G"] + n_today, 1] = g
 
         res = linprog(
-            self.cost,
+            cost,
             A_eq=self.a_eq,
             b_eq=b_eq,
             bounds=bounds,
@@ -670,6 +753,7 @@ def solve_readjust(
     eps: float = EPS,
     *,
     n_day: int = T,
+    price_scen: np.ndarray | None = None,
 ) -> ReadjustResult:
     """预报时刻 $t_0$ 的重优化：在冻结的 $G^0$ 上决定调整量 $\\Delta^\\pm$。
 
@@ -680,6 +764,9 @@ def solve_readjust(
     $G^a_t = G^0_t + \\Delta^+_t - \\Delta^-_t$ 代入当天平衡行（系数 ±1，$-G^0_t$ 进右端项）。
     目标在 $\\Delta^+$ 上取 $1.5p_t$、在 $\\Delta^-$ 上取 $-0.5p_t$，与结算式一致；
     两者同段净成本 $+p_t>0$，故不会共存。第二阶段与问 2 的 SAA 完全相同。
+
+    `price_scen` 形状与 `price48` 一致，为 (M, price48.size) 的按场景电价：$\\Delta^\\pm$
+    跨场景共享，按场景均价计费；紧急购电与次日购电按各场景电价计费。缺省退化为确定电价。
     """
     t0 = int(t0)
     price48 = np.asarray(price48, dtype=float)
@@ -701,16 +788,16 @@ def solve_readjust(
     struct = _saa_structure(m, n_rem, n_future, ("DP", "DM"))
     dp_off, dm_off = struct.first["DP"], struct.first["DM"]
 
+    ps48 = _scen_price(price_scen, m, price48.size)
+    ps = None if ps48 is None else np.concatenate(
+        [ps48[:, t0:n_day], ps48[:, n_day:]], axis=1
+    )
+    price_first = first_stage_price(price_h, ps, n_rem)
+
     cost = np.zeros(struct.n_var)
-    cost[dp_off : dp_off + n_rem] = ADJUST_UP * price_h[:n_rem]
-    cost[dm_off : dm_off + n_rem] = -ADJUST_DOWN * price_h[:n_rem]
-    for block in struct.blocks:
-        cost[block["E"] : block["E"] + struct.n_h] = 5.0 * price_h / m
-        cost[block["C"] : block["C"] + struct.n_h] = eps
-        cost[block["D"] : block["D"] + struct.n_h] = eps
-        cost[block["W"] : block["W"] + struct.n_h] = eps
-        if n_future:
-            cost[block["G"] : block["G"] + n_future] = price_h[n_rem:] / m
+    cost[dp_off : dp_off + n_rem] = ADJUST_UP * price_first
+    cost[dm_off : dm_off + n_rem] = -ADJUST_DOWN * price_first
+    _fill_scenario_cost(cost, struct, price_h, ps, eps)
 
     bounds = struct.bounds.copy()
     bounds[dm_off : dm_off + n_rem, 1] = np.maximum(g0_rem, 0.0)  # Δ⁻_t ≤ G0_t ⇒ G^a ≥ 0
@@ -734,14 +821,17 @@ def solve_readjust(
     dplus[t0:] = np.maximum(res.x[dp_off : dp_off + n_rem], 0.0)
     dminus[t0:] = np.clip(res.x[dm_off : dm_off + n_rem], 0.0, np.maximum(g0_rem, 0.0))
     Ga = np.maximum(G0 + dplus - dminus, 0.0)
+    price_day = np.empty(n_day)
+    price_day[:t0] = price48[:t0]  # $t<t_0$ 段无调整量，取何电价都不影响费用
+    price_day[t0:] = price_first[:n_rem]
     adjust_cost = float(
-        ADJUST_UP * price48[:n_day] @ dplus - ADJUST_DOWN * price48[:n_day] @ dminus
+        ADJUST_UP * price_day @ dplus - ADJUST_DOWN * price_day @ dminus
     )
     return ReadjustResult(
         Ga=Ga,
         dplus=dplus,
         dminus=dminus,
-        objective=float(res.fun) + float(price48[t0:n_day] @ g0_rem),
+        objective=float(res.fun) + float(price_first[:n_rem] @ g0_rem),
         adjust_cost=adjust_cost,
         status=res.message,
     )

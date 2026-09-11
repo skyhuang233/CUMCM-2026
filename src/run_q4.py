@@ -135,6 +135,8 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
     parser.add_argument("--k-pv", type=int, default=K_PV)
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
     parser.add_argument("--step-minutes", type=int, default=10)
+    parser.add_argument("--candidate-workers", type=int, default=1,
+                        help="每条回测中并行重评候选的进程数；与并行全年任务共享总核数")
     parser.add_argument(
         "--perfect-price", action="store_true", help="完美电价信息变体（费用下界）"
     )
@@ -170,6 +172,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 k_pv=args.k_pv,
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
+                candidate_workers=args.candidate_workers,
             ),
         )
         k_price = picked.k_price
@@ -203,6 +206,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 k_pv=args.k_pv,
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
+                candidate_workers=args.candidate_workers,
             ),
             start=args.start,
             end=args.end,
@@ -240,6 +244,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 k_pv=args.k_pv,
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
+                candidate_workers=args.candidate_workers,
             ),
             start=args.start,
             end=args.end,
@@ -281,6 +286,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 WARMUP_START, args.end, Q2Params(
                     k_load=args.k_load, k_pv=args.k_pv,
                     m_scen=args.m_scen, step_minutes=args.step_minutes,
+                    candidate_workers=args.candidate_workers,
                 ), bundle2, record_from=args.start, soc_init=SOC_INIT,
                 progress=args.progress,
             )
@@ -297,6 +303,7 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 WARMUP_START, args.end, Q3Params(
                     k_load=args.k_load, k_pv=args.k_pv,
                     m_scen=args.m_scen, step_minutes=args.step_minutes,
+                    candidate_workers=args.candidate_workers,
                 ), bundle3, record_from=args.start, soc_init=SOC_INIT,
                 progress=args.progress,
             )

@@ -35,8 +35,9 @@ from .data import (
     load_attachment2,
     load_attachment3,
 )
-from .executor import DayExecution, run_day, DPValueExecutor
-from .value_dp import next_day_value, evaluate_plan
+from .executor import DayExecution, run_day_dp, DPValueExecutor
+from .value_dp import next_day_value
+from .parallel_eval import CandidateEvaluator
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .forecast_pv import ISSUE_HOURS, PVIssueForecaster, issue_segment
@@ -64,6 +65,7 @@ class Params:
     # executed at each native 10-minute segment.
     step_minutes: int = 10
     issues: tuple[int, ...] = ISSUE_HOURS
+    candidate_workers: int = 1  # independent plan candidates; 1 keeps serial execution
 
 
 @dataclass
@@ -273,6 +275,7 @@ def run_period(
     out = PeriodResult(soc_end=float(soc_init), label=",".join(str(h) for h in issues))
     soc = float(soc_init)
     t_start = time.perf_counter()
+    candidate_evaluator = CandidateEvaluator(params.candidate_workers)
     for i, d in enumerate(daterange(start, end)):
         load_pred, _ = forecaster.predict(d)
         load_next, pv_mean_next = forecaster.predict_next(d)
@@ -317,8 +320,10 @@ def run_period(
         terminal0 = next_value(np.asarray(price48[T:], float), load_next, pv_next)
         p0_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
         candidates0 = [(1.0 - a) * g_s0 + a * g_d0 for a in (0.0, 0.25, 0.5, 0.75, 1.0)]
-        scored0 = [evaluate_plan(g, L_scen, PV_scen, price48[:T], soc, terminal0,
-                                 price_scen=p0_scen, return_hbar=True) for g in candidates0]
+        scored0 = candidate_evaluator.evaluate(
+            candidates0, L_scen, PV_scen, price48[:T], soc, terminal0,
+            price_scen=p0_scen,
+        )
         winner0 = int(np.argmin([score for score, _ in scored0]))
         G0, hbar0 = candidates0[winner0], scored0[winner0][1]
         Ga = G0.copy()  # 每段唯一的提交值；0:00–6:00 段恒等于 G^0
@@ -326,7 +331,6 @@ def run_period(
 
         execution = DayExecution.empty(d, soc)
         soc_block = soc
-        g_temp = G0.copy()
         for h0, t0, t1 in blocks:
             price_s = price_scen
             if h0:
@@ -370,31 +374,26 @@ def run_period(
                     (1.0 - a) * rj.Ga[t0:] + a * rj_point.Ga[t0:]
                     for a in (0.0, 0.25, 0.5, 0.75, 1.0)
                 ]
-                scored = [evaluate_plan(g, L_s, PV_s, p_eval, soc_block, vnext,
-                                         price_scen=ps_eval, base_plan=G0[t0:],
-                                         return_hbar=True) for g in cand]
+                scored = candidate_evaluator.evaluate(
+                    cand, L_s, PV_s, p_eval, soc_block, vnext,
+                    price_scen=ps_eval, base_plan=G0[t0:],
+                )
                 wi = int(np.argmin([score for score, _ in scored]))
-                chosen, hbar_chosen = cand[wi], scored[wi][1]
-                rj.Ga[t0:] = chosen
-                Ga[t0:t1] = chosen[: t1 - t0]  # 只提交到下一预报时刻，其余为临时决策
+                chosen_ga, hbar_chosen = cand[wi], scored[wi][1]
+                Ga[t0:t1] = chosen_ga[: t1 - t0]  # 只提交到下一预报时刻，其余为临时决策
                 g_cur[t0:t1] = Ga[t0:t1]
-                g_temp[t0:] = rj.Ga[t0:]
             # 每次重优化后从当前时刻重算未来费用函数，并用 DP 价值执行器逐段执行。
             hbar = hbar0 if h0 == 0 else hbar_chosen
             price_rem = np.asarray(price48_h if h0 else price48, float)[t0:T]
             dp_executor = DPValueExecutor(hbar, price=price_rem).prepare(t0)
-            run_day(
+            run_day_dp(
                 d,
                 g_cur,
                 soc_block,
                 load_true,
                 pv_true,
-                load_pred,
-                pv_today,
-                load_next,
-                pv_next,
+                price,
                 dp_executor,
-                step_minutes=params.step_minutes,
                 t_start=t0,
                 t_end=t1,
                 out=execution,
@@ -435,6 +434,7 @@ def run_period(
 
     out.soc_end = soc
     out.runtime_s = time.perf_counter() - t_start
+    candidate_evaluator.close()
     return out
 
 
@@ -511,6 +511,8 @@ def main(argv: list[str] | None = None) -> PeriodResult:
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
     parser.add_argument("--step-minutes", type=int, default=10,
                         help="仅 legacy 滚动 LP 实验使用；DP 主流程固定 10 分钟")
+    parser.add_argument("--candidate-workers", type=int, default=1,
+                        help="并行重评独立候选的进程数；单次回测最多有效使用 5 个")
     parser.add_argument("--issues", type=_parse_issues, default=ISSUE_HOURS,
                         help="可用预报时刻子集，如 0,6,12（必须含 0）")
     parser.add_argument("--variants", action="store_true",
@@ -524,7 +526,12 @@ def main(argv: list[str] | None = None) -> PeriodResult:
 
     wall = time.perf_counter()
     bundle = load_bundle()
-    params = Params(m_scen=args.m_scen, step_minutes=args.step_minutes, issues=args.issues)
+    params = Params(
+        m_scen=args.m_scen,
+        step_minutes=args.step_minutes,
+        issues=args.issues,
+        candidate_workers=args.candidate_workers,
+    )
 
     if args.k_load is not None:
         params.k_load = args.k_load
@@ -564,6 +571,7 @@ def main(argv: list[str] | None = None) -> PeriodResult:
                 m_scen=params.m_scen,
                 step_minutes=params.step_minutes,
                 issues=issues,
+                candidate_workers=params.candidate_workers,
             ),
             bundle,
             record_from=args.start,

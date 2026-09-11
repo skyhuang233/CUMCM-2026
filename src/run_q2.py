@@ -29,8 +29,9 @@ from .data import (
     load_attachment1,
     load_attachment2,
 )
-from .executor import DayExecution, run_day, DPValueExecutor
-from .value_dp import next_day_value, evaluate_plan
+from .executor import DayExecution, run_day_dp, DPValueExecutor
+from .value_dp import next_day_value
+from .parallel_eval import CandidateEvaluator
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
 from .optimizer import solve_saa, solve_saa_point
@@ -55,6 +56,7 @@ class Params:
     # causal at the native 10-minute cadence and deliberately ignores it.
     step_minutes: int = 10
     horizon_days: int = 2  # 2 = 48h（当天 + 次日）；1 = 24h；3 = 72h
+    candidate_workers: int = 1  # independent plan candidates; 1 keeps serial execution
 
 
 @dataclass
@@ -194,6 +196,7 @@ def run_period(
     out = PeriodResult(soc_end=float(soc_init))
     soc = float(soc_init)
     t_start = time.perf_counter()
+    candidate_evaluator = CandidateEvaluator(params.candidate_workers)
     for i, d in enumerate(daterange(start, end)):
         load_pred, pv_pred = forecaster.predict(d)
         load_future, pv_future = forecaster.predict_future(d, n_days - 1)
@@ -212,7 +215,6 @@ def run_period(
             pv_future,
             soc,
             n_today=T,
-            with_point=d in point_days,
             price_scen=price_scen,
         )
         point = solve_saa_point(price_h, load_pred, pv_pred, load_future, pv_future, soc)
@@ -226,10 +228,10 @@ def run_period(
         )
         p_eval_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
         candidates = [((1-a)*g_s+a*g_d) for a in (0., .25, .5, .75, 1.)]
-        scored = [evaluate_plan(
-            g, L_scen, PV_scen, price_h[:T], soc, terminal_for_eval,
-            price_scen=p_eval_scen, return_hbar=True,
-        ) for g in candidates]
+        scored = candidate_evaluator.evaluate(
+            candidates, L_scen, PV_scen, price_h[:T], soc, terminal_for_eval,
+            price_scen=p_eval_scen,
+        )
         winner = int(np.argmin([score for score, _ in scored]))
         g0, hbar = candidates[winner], scored[winner][1]
 
@@ -238,16 +240,13 @@ def run_period(
         dp_executor = DPValueExecutor(hbar, price=price_h[:T]).prepare(0)
         price_true = ps.truth(d)
         price_fn = (lambda t, p=price_true: float(p[t])) if ps.varies else None
-        execution: DayExecution = run_day(
+        execution: DayExecution = run_day_dp(
             d,
             g0,
             soc,
             load_true,
             pv_true,
-            load_pred,
-            pv_pred,
-            load_future,
-            pv_future,
+            price_true,
             dp_executor,
             price_fn=price_fn,
         )
@@ -266,7 +265,7 @@ def run_period(
                     soc_start=execution.soc_start,
                     plan_cost=plan_cost,
                     emergency_cost=emergency_cost,
-                    point_solution=saa.point_solution,
+                    point_solution=point if d in point_days else None,
                     price=price_true if ps.varies else None,
                 )
             )
@@ -281,6 +280,7 @@ def run_period(
 
     out.soc_end = soc
     out.runtime_s = time.perf_counter() - t_start
+    candidate_evaluator.close()
     return out
 
 
@@ -328,6 +328,8 @@ def main(argv: list[str] | None = None) -> PeriodResult:
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
     parser.add_argument("--step-minutes", type=int, default=10,
                         help="仅 legacy 滚动 LP 实验使用；DP 主流程固定 10 分钟")
+    parser.add_argument("--candidate-workers", type=int, default=1,
+                        help="并行重评独立候选的进程数；单次回测最多有效使用 5 个")
     parser.add_argument("--start", type=date.fromisoformat, default=RECORD_START)
     parser.add_argument("--end", type=date.fromisoformat, default=PERIOD_END)
     parser.add_argument("--out", default="results/result2.xlsx")
@@ -337,7 +339,11 @@ def main(argv: list[str] | None = None) -> PeriodResult:
 
     wall = time.perf_counter()
     bundle = load_bundle()
-    params = Params(m_scen=args.m_scen, step_minutes=args.step_minutes)
+    params = Params(
+        m_scen=args.m_scen,
+        step_minutes=args.step_minutes,
+        candidate_workers=args.candidate_workers,
+    )
 
     if args.k_load is not None:
         params.k_load = args.k_load

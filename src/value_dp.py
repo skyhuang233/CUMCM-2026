@@ -6,6 +6,7 @@ SOC 或充放电量离散成整数。该模块刻意保持纯 numpy，便于候�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 import numpy as np
 
 from .data import ETA, P_MAX_KWH, SOC_MAX, SOC_MIN
@@ -107,19 +108,20 @@ def next_day_value(price, load, pv, *, terminal=None, grid=None):
     price, load, pv = map(lambda a: np.asarray(a,float).ravel(), (price,load,pv))
     g = _grid() if grid is None else np.asarray(grid,float)
     v = np.zeros(g.size) if terminal is None else np.asarray(terminal(g),float)
+    action_u = np.linspace(0.0, 1.0, 33)
     for t in range(len(price)-1, -1, -1):
-        new = np.empty_like(v)
         n = load[t]-pv[t]
-        for i,e in enumerate(g):
-            best = np.inf
-            lo_x = max(-P_MAX_KWH / ETA, SOC_MIN - e)
-            hi_x = min(ETA * P_MAX_KWH, SOC_MAX - e)
-            for x in np.linspace(lo_x, hi_x, 33):
-                ee=e+x
-                q=x/ETA if x>=0 else ETA*x
-                best=min(best, price[t]*max(n+q,0)+float(np.interp(ee,g,v)))
-            new[i]=best
-        v=new
+        e = g[:, None]
+        lo_x = np.maximum(-P_MAX_KWH / ETA, SOC_MIN - e[:, 0])
+        hi_x = np.minimum(ETA * P_MAX_KWH, SOC_MAX - e[:, 0])
+        # Keep the original 33 uniformly spaced actions for every SOC state;
+        # broadcasting removes the Python loops without changing the mesh.
+        x = lo_x[:, None] + (hi_x - lo_x)[:, None] * action_u[None, :]
+        ee = e + x
+        q = np.where(x >= 0.0, x / ETA, ETA * x)
+        stage = price[t] * np.maximum(n + q, 0.0)
+        continuation = np.interp(ee.ravel(), g, v).reshape(ee.shape)
+        v = np.min(stage + continuation, axis=1)
     return ConvexPiecewiseLinear(g,v)
 
 
@@ -151,28 +153,71 @@ def future_cost(price, load_scen, pv_scen, g_plan, terminal_value=None, *, grid=
     if p.shape[0] != L.shape[0] or p.shape[1] < L.shape[1]: raise ValueError("price/scenario shape mismatch")
     G=np.asarray(g_plan,float).ravel(); g=_grid() if grid is None else np.asarray(grid,float)
     if terminal_value is None: terminal_value = lambda z: np.zeros_like(np.asarray(z,float))
-    out=[]
+
+    def range_min(values, lowers, uppers):
+        """Sliding-window minima for monotone integer interval bounds."""
+        out = np.full(len(lowers), np.inf, dtype=float)
+        q = deque()
+        next_add = 0
+        for i, (lo_i, hi_i) in enumerate(zip(lowers, uppers)):
+            lo_i, hi_i = int(lo_i), int(hi_i)
+            while next_add <= hi_i and next_add < len(values):
+                value = values[next_add]
+                while q and values[q[-1]] >= value:
+                    q.pop()
+                q.append(next_add)
+                next_add += 1
+            while q and q[0] < lo_i:
+                q.popleft()
+            if lo_i <= hi_i and q:
+                out[i] = values[q[0]]
+        return out
+    # Every scenario is evaluated on the same SOC mesh ``g``.  Accumulate the
+    # values directly instead of materialising M complete lists of piecewise
+    # linear functions and merging them again with ``unique → interp``.
+    # Keeping the mesh fixed also makes this numerically identical to the old
+    # ``average_functions`` path (which reduced to the very same grid).
+    accumulated = np.zeros((L.shape[1] + 1, g.size), dtype=float)
+    grid_indices = np.arange(g.size)
     for w in range(L.shape[0]):
-        v=np.asarray(terminal_value(g),float); fs=[None]*(L.shape[1]+1)
-        fs[-1]=ConvexPiecewiseLinear(g,v)
+        v=np.asarray(terminal_value(g),float)
+        accumulated[-1] += v
         for t in range(L.shape[1]-1,-1,-1):
-            vals=[]; r=L[w,t]-PV[w,t]-G[t]
-            for e in g:
-                if r<=0:
-                    c=min(-r,P_MAX_KWH,(SOC_MAX-e)/ETA); ee=e+ETA*c; val=float(np.interp(ee,g,v))
-                else:
-                    ylo=max(SOC_MIN, e-P_MAX_KWH/ETA)
-                    ys=g[(g >= ylo-1e-9) & (g <= e+1e-9)]
-                    if ys.size == 0: ys=np.array([ylo])
-                    # 还要检查紧急购电恰好为零的折点 y=e-r/eta。
-                    ys=np.unique(np.concatenate([ys, [np.clip(e-r/ETA, ylo, e)]]))
-                    d=ETA*(e-ys)
-                    cand=5*p[w,t]*np.maximum(r-d,0.0)+np.interp(ys,g,v)
-                    val=float(np.min(cand))
-                vals.append(val)
-            v=np.asarray(vals); fs[t]=ConvexPiecewiseLinear(g,v)
-        out.append(fs)
-    return [average_functions([f[t] for f in out]) for t in range(L.shape[1]+1)]
+            r = L[w, t] - PV[w, t] - G[t]
+            e = g
+            if r <= 0:
+                c = np.minimum.reduce((-r * np.ones_like(e),
+                                        P_MAX_KWH * np.ones_like(e),
+                                        (SOC_MAX - e) / ETA))
+                v = np.interp(e + ETA * c, g, v)
+            else:
+                # Split the reachable previous-SOC interval at the
+                # zero-emergency kink.  Each side is an interval minimum over
+                # a fixed grid expression, computable for all states in O(G)
+                # with sliding-window deques.
+                ylo = np.maximum(SOC_MIN, e - P_MAX_KWH / ETA)
+                kink = np.clip(e - r / ETA, ylo, e)
+                kink_cost = 5.0 * p[w, t] * np.maximum(r - ETA * (e - kink), 0.0)
+                kink_cost += np.interp(kink, g, v)
+                lo_idx = np.searchsorted(g, ylo - 1e-9, side="left")
+                zero_hi = np.minimum(
+                    np.searchsorted(g, e - r / ETA + 1e-9, side="right") - 1,
+                    grid_indices,
+                )
+                affine_lo = np.maximum(
+                    np.searchsorted(g, e - r / ETA - 1e-9, side="left"),
+                    lo_idx,
+                )
+                affine_values = v + 5.0 * p[w, t] * ETA * g
+                zero_min = range_min(v, lo_idx, zero_hi)
+                affine_min = range_min(affine_values, affine_lo, grid_indices)
+                affine_const = 5.0 * p[w, t] * (r - ETA * e)
+                best = np.minimum(kink_cost, zero_min)
+                best = np.minimum(best, affine_const + affine_min)
+                v = best
+            accumulated[t] += v
+    m = float(L.shape[0])
+    return [ConvexPiecewiseLinear(g, values / m) for values in accumulated]
 
 
 def reserve_level(h_next, price, *, lo=SOC_MIN, hi=SOC_MAX):

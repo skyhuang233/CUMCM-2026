@@ -29,10 +29,11 @@ from .data import (
     load_attachment1,
     load_attachment2,
 )
-from .executor import DayExecution, run_day
+from .executor import DayExecution, run_day, DPValueExecutor
+from .value_dp import next_day_value, future_cost, evaluate_plan
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
-from .optimizer import StorageRollingSolver, solve_saa
+from .optimizer import StorageRollingSolver, solve_saa, solve_saa_point
 from .results import print_day_summary, summarize_day, write_result2
 from .scenarios import M_SCEN, ResidualLibrary
 from .settlement import cost_q2
@@ -68,6 +69,7 @@ class DayResult:
     soc_start: float
     plan_cost: float
     emergency_cost: float
+    R: np.ndarray | None = None
     point_solution: object | None = None  # 点预测解，仅供论文对照
     price: np.ndarray | None = None  # 该日结算电价（None = 附件 1 常数电价）
 
@@ -212,9 +214,24 @@ def run_period(
             with_point=d in point_days,
             price_scen=price_scen,
         )
-        g0 = np.maximum(saa.G0, 0.0)
+        point = solve_saa_point(price_h, load_pred, pv_pred, load_future, pv_future, soc)
+        g_s, g_d = np.maximum(saa.G0, 0.0), np.maximum(point.G[:T], 0.0)
+        terminal_for_eval = next_day_value(price_h[T:] if price_h.size > T else price_h, load_future[:T], pv_future[:T])
+        p_eval_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
+        g0 = min(
+            [((1-a)*g_s+a*g_d) for a in (0., .25, .5, .75, 1.)],
+            key=lambda g: evaluate_plan(
+                g, L_scen, PV_scen, price_h[:T], soc, terminal_for_eval,
+                price_scen=p_eval_scen
+            ),
+        )
 
         load_true, pv_true = bundle.truth(d)
+        # DP 价值执行器：由次日价值与同批场景反推剩余费用函数。
+        v_next = next_day_value(price_h[T:] if price_h.size > T else price_h, load_future[:T], pv_future[:T])
+        p_h_scen = price_h[:T] if p_eval_scen is None else p_eval_scen
+        hbar = future_cost(p_h_scen, L_scen, PV_scen, g0, v_next)
+        dp_executor = DPValueExecutor(hbar, price=price_h[:T]).prepare(0)
         price_fn = None
         if ps.varies:
             price_fn = lambda t, day=d: horizon_price(ps, day, t + 1, n_days)  # noqa: E731
@@ -228,7 +245,7 @@ def run_period(
             pv_pred,
             load_future,
             pv_future,
-            solver,
+            dp_executor,
             step_minutes=params.step_minutes,
             price_fn=price_fn,
         )
@@ -244,6 +261,7 @@ def run_period(
                     S=execution.S,
                     E=execution.E,
                     W=execution.W,
+                    R=execution.R,
                     soc_start=execution.soc_start,
                     plan_cost=plan_cost,
                     emergency_cost=emergency_cost,

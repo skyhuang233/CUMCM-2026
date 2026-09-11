@@ -66,6 +66,16 @@ def test_validate_rejects_a_broken_soc_chain(short_run):
         validate(broken, bundle)
 
 
+@pytest.mark.parametrize("horizon_days", [1, 3])
+def test_documented_horizon_variants_are_shape_safe(horizon_days):
+    bundle = load_bundle()
+    res = run_period(
+        date(2025, 1, 1), date(2025, 1, 1),
+        Params(horizon_days=horizon_days), bundle, soc_init=SOC_INIT,
+    )
+    assert np.isfinite(res.total_cost)
+
+
 def test_write_result2_layout(short_run, tmp_path):
     _, res = short_run
     path = write_result2(res.days, str(tmp_path / "result2.xlsx"))

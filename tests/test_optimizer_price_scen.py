@@ -30,8 +30,8 @@ def curves(att):
     return price48, L, PV, L_scen, PV_scen
 
 
-def test_cost_vector_without_price_scen_is_byte_identical(curves):
-    """`price_scen=None` 时的代价向量与「单一电价」旧式装配逐位相同。"""
+def test_cost_vector_without_price_scen_uses_sample_average_regularizer(curves):
+    """确定电价路径也让每个第二阶段项按场景数平均。"""
     price48, *_ = curves
     m, n_today, n_future = 12, T, T
     struct = _saa_structure(m, n_today, n_future)
@@ -40,9 +40,9 @@ def test_cost_vector_without_price_scen_is_byte_identical(curves):
     old[struct.g0_off : struct.g0_off + n_today] = price48[:n_today]
     for block in struct.blocks:
         old[block["E"] : block["E"] + struct.n_h] = 5.0 * price48 / m
-        old[block["C"] : block["C"] + struct.n_h] = EPS
-        old[block["D"] : block["D"] + struct.n_h] = EPS
-        old[block["W"] : block["W"] + struct.n_h] = EPS
+        old[block["C"] : block["C"] + struct.n_h] = EPS / m
+        old[block["D"] : block["D"] + struct.n_h] = EPS / m
+        old[block["W"] : block["W"] + struct.n_h] = EPS / m
         old[block["G"] : block["G"] + n_future] = price48[n_today:] / m
 
     new = saa_cost_vector(struct, price48, None, EPS)

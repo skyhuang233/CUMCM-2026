@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -277,15 +278,20 @@ class SAAStructure:
     n_future: int
     n_h: int
     n_var: int
-    g0_off: int
     first: dict[str, int]
     blocks: list[dict[str, int]]
     a_eq: sp.csr_matrix
     bounds: np.ndarray  # (n_var, 2) 的 [下界, 上界]
     rows_per_scen: int
 
+    @property
+    def g0_off(self) -> int:
+        """Backward-compatible view; callers should use ``first['G']``."""
+        return self.first.get("G", 0)
 
-_SAA_CACHE: dict[tuple[int, int, int, tuple[str, ...]], SAAStructure] = {}
+
+_SAA_CACHE: OrderedDict[tuple[int, int, int, tuple[str, ...]], SAAStructure] = OrderedDict()
+_SAA_CACHE_MAXSIZE = 32
 
 
 def _saa_structure(
@@ -299,6 +305,7 @@ def _saa_structure(
     key = (m, n_today, n_future, first_stage)
     hit = _SAA_CACHE.get(key)
     if hit is not None:
+        _SAA_CACHE.move_to_end(key)
         return hit
 
     n_h = n_today + n_future
@@ -349,7 +356,6 @@ def _saa_structure(
         n_future=n_future,
         n_h=n_h,
         n_var=n_var,
-        g0_off=first.get("G", 0),
         first=first,
         blocks=blocks,
         a_eq=a_eq,
@@ -357,6 +363,11 @@ def _saa_structure(
         rows_per_scen=2 * n_h,
     )
     _SAA_CACHE[key] = struct
+    _SAA_CACHE.move_to_end(key)
+    # Keep the process-wide structural cache bounded while preserving the
+    # existing fast path for repeated daily solves.
+    while len(_SAA_CACHE) > _SAA_CACHE_MAXSIZE:
+        _SAA_CACHE.pop(next(iter(_SAA_CACHE)))
     return struct
 
 
@@ -368,7 +379,6 @@ class SAAResult:
     objective: float
     plan_cost: float
     expected_recourse_cost: float
-    point_solution: LPResult | None = None
     status: str = ""
 
 
@@ -388,7 +398,7 @@ def _fill_scenario_cost(
     ps: np.ndarray | None,
     eps: float,
 ) -> None:
-    """填入第二阶段各场景块的代价：紧急购电 5p/M、次日购电 p/M、吞吐惩罚 eps。
+    """填入第二阶段各场景块的 sample-average 代价。
 
     `ps` 为 None 时全部场景共用 `price_h`（确定电价）；否则场景 ω 用自己的 $p_{\\omega}$。
     """
@@ -396,9 +406,9 @@ def _fill_scenario_cost(
     for w, block in enumerate(struct.blocks):
         p_w = price_h if ps is None else ps[w]
         cost[block["E"] : block["E"] + n_h] = 5.0 * p_w / m
-        cost[block["C"] : block["C"] + n_h] = eps
-        cost[block["D"] : block["D"] + n_h] = eps
-        cost[block["W"] : block["W"] + n_h] = eps
+        cost[block["C"] : block["C"] + n_h] = eps / m
+        cost[block["D"] : block["D"] + n_h] = eps / m
+        cost[block["W"] : block["W"] + n_h] = eps / m
         if n_future:
             cost[block["G"] : block["G"] + n_future] = p_w[struct.n_today :] / m
 
@@ -426,7 +436,8 @@ def saa_cost_vector(
     """问 2 的 SAA LP 完整代价向量（第一阶段 G0 + 各场景块）。"""
     cost = np.zeros(struct.n_var)
     n_today = struct.n_today
-    cost[struct.g0_off : struct.g0_off + n_today] = first_stage_price(price_h, ps, n_today)
+    g0_off = struct.first["G"]
+    cost[g0_off : g0_off + n_today] = first_stage_price(price_h, ps, n_today)
     _fill_scenario_cost(cost, struct, price_h, ps, eps)
     return cost
 
@@ -490,7 +501,6 @@ def solve_saa(
     eps: float = EPS,
     *,
     n_today: int = T,
-    with_point: bool = False,
     price_scen: np.ndarray | None = None,
 ) -> SAAResult:
     """0:00 的 SAA 两阶段购电 LP。
@@ -503,33 +513,25 @@ def solve_saa(
     $\\bar p^s_t = \\frac1M\\sum_\\omega p_{\\omega,t}$ 计价（$G^0$ 共享，与按场景计费取期望等价）。
     缺省 None 时完全退化为单一 `price_h` 的确定电价路径。
 
-    `with_point=True` 时另用点预测曲线（M=1、残差为零）解一次同结构 LP，
-    返回其充放电与储电量轨迹作为「点预测解」，仅供论文对照，不进入执行。
+    点预测解由调用方显式使用 :func:`solve_saa_point` 求解；此函数只返回
+    SAA 场景解，避免把场景均值误标为「残差为零」的点预测解。
     """
     x, struct, obj, status = _solve_saa_core(
         price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today, price_scen
     )
     price_h = np.asarray(price_h, dtype=float)
-    G0 = x[struct.g0_off : struct.g0_off + n_today]
+    g0_off = struct.first["G"]
+    G0 = x[g0_off : g0_off + n_today]
     plan_price = first_stage_price(
         price_h, _scen_price(price_scen, struct.m, struct.n_h), n_today
     )
     plan_cost = float(plan_price @ G0)
-
-    point = None
-    if with_point:
-        L0 = np.atleast_2d(np.asarray(L_scen, dtype=float)).mean(axis=0)
-        PV0 = np.atleast_2d(np.asarray(PV_scen, dtype=float)).mean(axis=0)
-        point = solve_saa_point(
-            price_h, L0, PV0, L_future, PV_future, soc_init, eps, n_today=n_today
-        )
 
     return SAAResult(
         G0=G0,
         objective=obj,
         plan_cost=plan_cost,
         expected_recourse_cost=obj - plan_cost,
-        point_solution=point,
         status=status,
     )
 
@@ -555,7 +557,8 @@ def solve_saa_point(
     block = struct.blocks[0]
     n_h, n_future = struct.n_h, struct.n_future
     G = np.empty(n_h)
-    G[:n_today] = x[struct.g0_off : struct.g0_off + n_today]
+    g0_off = struct.first["G"]
+    G[:n_today] = x[g0_off : g0_off + n_today]
     if n_future:
         G[n_today:] = x[block["G"] : block["G"] + n_future]
     take = lambda name: x[block[name] : block[name] + n_h]  # noqa: E731

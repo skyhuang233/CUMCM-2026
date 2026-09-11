@@ -29,11 +29,12 @@ from .data import (
     load_attachment1,
     load_attachment2,
 )
-from .executor import DayExecution, run_day, DPValueExecutor
-from .value_dp import next_day_value, future_cost, evaluate_plan
+from .executor import DayExecution, run_day_dp, DPValueExecutor
+from .value_dp import next_day_value
+from .parallel_eval import CandidateEvaluator
 from .forecast import PointForecaster
 from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
-from .optimizer import StorageRollingSolver, solve_saa, solve_saa_point
+from .optimizer import solve_saa, solve_saa_point
 from .results import print_day_summary, summarize_day, write_result2
 from .scenarios import M_SCEN, ResidualLibrary
 from .settlement import cost_q2
@@ -51,8 +52,11 @@ class Params:
     k_load: int = 4
     k_pv: int = 5
     m_scen: int = M_SCEN
+    # Kept for legacy StorageRollingSolver experiments only.  DP execution is
+    # causal at the native 10-minute cadence and deliberately ignores it.
     step_minutes: int = 10
     horizon_days: int = 2  # 2 = 48h（当天 + 次日）；1 = 24h；3 = 72h
+    candidate_workers: int = 1  # independent plan candidates; 1 keeps serial execution
 
 
 @dataclass
@@ -182,7 +186,6 @@ def run_period(
         bundle.daily, bundle.att1, k_load=params.k_load, k_pv=params.k_pv
     )
     library = ResidualLibrary()
-    solver = StorageRollingSolver(price_h0, n_today=T)
 
     # 起始日之前的历史也要入库，否则场景层要等到区间中段才有残差可用。
     for d in daterange(bundle.daily.dates[0], start - timedelta(days=1)):
@@ -193,6 +196,7 @@ def run_period(
     out = PeriodResult(soc_end=float(soc_init))
     soc = float(soc_init)
     t_start = time.perf_counter()
+    candidate_evaluator = CandidateEvaluator(params.candidate_workers)
     for i, d in enumerate(daterange(start, end)):
         load_pred, pv_pred = forecaster.predict(d)
         load_future, pv_future = forecaster.predict_future(d, n_days - 1)
@@ -211,45 +215,41 @@ def run_period(
             pv_future,
             soc,
             n_today=T,
-            with_point=d in point_days,
             price_scen=price_scen,
         )
         point = solve_saa_point(price_h, load_pred, pv_pred, load_future, pv_future, soc)
         g_s, g_d = np.maximum(saa.G0, 0.0), np.maximum(point.G[:T], 0.0)
-        terminal_for_eval = next_day_value(price_h[T:] if price_h.size > T else price_h, load_future[:T], pv_future[:T])
-        p_eval_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
-        g0 = min(
-            [((1-a)*g_s+a*g_d) for a in (0., .25, .5, .75, 1.)],
-            key=lambda g: evaluate_plan(
-                g, L_scen, PV_scen, price_h[:T], soc, terminal_for_eval,
-                price_scen=p_eval_scen
-            ),
+        # The terminal DP prices every available future day.  This makes the
+        # documented 24/48/72-hour horizon variants shape-safe: 24h has an
+        # empty future and hence a zero terminal value.
+        terminal_for_eval = (
+            next_day_value(price_h[T:], load_future, pv_future)
+            if n_future else None
         )
+        p_eval_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
+        candidates = [((1-a)*g_s+a*g_d) for a in (0., .25, .5, .75, 1.)]
+        scored = candidate_evaluator.evaluate(
+            candidates, L_scen, PV_scen, price_h[:T], soc, terminal_for_eval,
+            price_scen=p_eval_scen,
+        )
+        winner = int(np.argmin([score for score, _ in scored]))
+        g0, hbar = candidates[winner], scored[winner][1]
 
         load_true, pv_true = bundle.truth(d)
         # DP 价值执行器：由次日价值与同批场景反推剩余费用函数。
-        v_next = next_day_value(price_h[T:] if price_h.size > T else price_h, load_future[:T], pv_future[:T])
-        p_h_scen = price_h[:T] if p_eval_scen is None else p_eval_scen
-        hbar = future_cost(p_h_scen, L_scen, PV_scen, g0, v_next)
         dp_executor = DPValueExecutor(hbar, price=price_h[:T]).prepare(0)
-        price_fn = None
-        if ps.varies:
-            price_fn = lambda t, day=d: horizon_price(ps, day, t + 1, n_days)  # noqa: E731
-        execution: DayExecution = run_day(
+        price_true = ps.truth(d)
+        price_fn = (lambda t, p=price_true: float(p[t])) if ps.varies else None
+        execution: DayExecution = run_day_dp(
             d,
             g0,
             soc,
             load_true,
             pv_true,
-            load_pred,
-            pv_pred,
-            load_future,
-            pv_future,
+            price_true,
             dp_executor,
-            step_minutes=params.step_minutes,
             price_fn=price_fn,
         )
-        price_true = ps.truth(d)
         plan_cost, emergency_cost = cost_q2(price_true, g0, execution.E)
         if d >= record_from:
             out.days.append(
@@ -265,7 +265,7 @@ def run_period(
                     soc_start=execution.soc_start,
                     plan_cost=plan_cost,
                     emergency_cost=emergency_cost,
-                    point_solution=saa.point_solution,
+                    point_solution=point if d in point_days else None,
                     price=price_true if ps.varies else None,
                 )
             )
@@ -280,6 +280,7 @@ def run_period(
 
     out.soc_end = soc
     out.runtime_s = time.perf_counter() - t_start
+    candidate_evaluator.close()
     return out
 
 
@@ -325,7 +326,10 @@ def main(argv: list[str] | None = None) -> PeriodResult:
     parser.add_argument("--k-load", type=int, default=None)
     parser.add_argument("--k-pv", type=int, default=None)
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
-    parser.add_argument("--step-minutes", type=int, default=10)
+    parser.add_argument("--step-minutes", type=int, default=10,
+                        help="仅 legacy 滚动 LP 实验使用；DP 主流程固定 10 分钟")
+    parser.add_argument("--candidate-workers", type=int, default=1,
+                        help="并行重评独立候选的进程数；单次回测最多有效使用 5 个")
     parser.add_argument("--start", type=date.fromisoformat, default=RECORD_START)
     parser.add_argument("--end", type=date.fromisoformat, default=PERIOD_END)
     parser.add_argument("--out", default="results/result2.xlsx")
@@ -335,7 +339,11 @@ def main(argv: list[str] | None = None) -> PeriodResult:
 
     wall = time.perf_counter()
     bundle = load_bundle()
-    params = Params(m_scen=args.m_scen, step_minutes=args.step_minutes)
+    params = Params(
+        m_scen=args.m_scen,
+        step_minutes=args.step_minutes,
+        candidate_workers=args.candidate_workers,
+    )
 
     if args.k_load is not None:
         params.k_load = args.k_load

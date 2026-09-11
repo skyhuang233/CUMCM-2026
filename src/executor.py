@@ -52,7 +52,7 @@ class DayExecution:
         )
 
 
-def run_day(
+def run_day_rolling_lp(
     d: date,
     g_today: np.ndarray,
     soc_init: float,
@@ -69,7 +69,7 @@ def run_day(
     t_start: int = 0,
     t_end: int | None = None,
     out: DayExecution | None = None,
-    price_fn: Callable[[int], np.ndarray] | None = None,
+    price_fn: Callable[[int], float | np.ndarray] | None = None,
 ) -> DayExecution:
     """执行日期 d 的段区间 `[t_start, t_end)`（默认整天），返回逐段执行值。
 
@@ -78,19 +78,8 @@ def run_day(
     `price_fn(t)` 给出段 t 开始时可得的 48h 电价向量（问 4 的波动电价），缺省沿用
     滚动 LP 构造时的电价。
     """
-    # 新执行器契约的简化调用为
-    # run_day(d, g, soc, L_true, PV_true, price_true, executor, ...)。
-    # 保留旧的滚动 LP 调用签名以兼容对照实验和已有使用方。
-    if solver is None and load_future is None and pv_future is None and isinstance(pv_pred, DPValueExecutor):
-        price_true = np.asarray(load_pred, dtype=float)
-        solver = pv_pred
-        load_pred = np.asarray(load_true, dtype=float)
-        pv_pred = np.asarray(pv_true, dtype=float)
-        load_future = np.zeros(0)
-        pv_future = np.zeros(0)
-        if solver.price is None: solver.price = price_true
     if solver is None:
-        raise TypeError("run_day 需要 executor/solver")
+        raise TypeError("run_day_rolling_lp 需要 StorageRollingSolver")
     load_pred = np.asarray(load_true if load_pred is None else load_pred, dtype=float)
     pv_pred = np.asarray(pv_true if pv_pred is None else pv_pred, dtype=float)
     load_future = np.zeros(0) if load_future is None else np.asarray(load_future, dtype=float)
@@ -98,7 +87,7 @@ def run_day(
     g_today = np.asarray(g_today, dtype=float)
     load_true = np.asarray(load_true, dtype=float)
     pv_true = np.asarray(pv_true, dtype=float)
-    k = 1 if isinstance(solver, DPValueExecutor) else max(1, round(step_minutes / 10))
+    k = max(1, round(step_minutes / 10))
     t_end = n_seg if t_end is None else int(t_end)
 
     ex = DayExecution.empty(d, soc_init, n_seg) if out is None else out
@@ -107,12 +96,7 @@ def run_day(
 
     t = int(t_start)
     while t < t_end:
-        if isinstance(solver, DPValueExecutor):
-            c0, d0, r0 = solver.step(t, soc, load_true[t], pv_true[t], g_today[t], solver.price_at(t, price_fn))
-            class _Step: pass
-            step = _Step(); step.C = np.zeros(n_seg); step.D = np.zeros(n_seg); step.C[t] = c0; step.D[t] = d0; step.R = r0
-        else:
-            step = solver.solve(
+        step = solver.solve(
             t,
             soc,
             load_true[t],
@@ -139,10 +123,89 @@ def run_day(
             assert SOC_MIN - 1e-6 <= soc <= SOC_MAX + 1e-6, f"{d} 段 {tau} 储电量越界：{soc}"
             soc = min(max(soc, SOC_MIN), SOC_MAX)  # 只压掉 1e-12 级数值噪声
             S[tau] = soc
-            if isinstance(solver, DPValueExecutor) and ex.R is not None: ex.R[tau] = float(step.R)
+
         t += k
 
     return ex
+
+
+def run_day_dp(
+    d: date,
+    g_today: np.ndarray,
+    soc_init: float,
+    load_true: np.ndarray,
+    pv_true: np.ndarray,
+    price_true: np.ndarray | float,
+    executor: "DPValueExecutor",
+    *,
+    t_start: int = 0,
+    t_end: int | None = None,
+    out: DayExecution | None = None,
+    price_fn: Callable[[int], float | np.ndarray] | None = None,
+) -> DayExecution:
+    """Execute a day with the native-cadence DP value executor."""
+    if not isinstance(executor, DPValueExecutor):
+        raise TypeError("run_day_dp 需要 DPValueExecutor")
+    if executor.price is None and price_true is not None:
+        executor.price = np.asarray(price_true, dtype=float)
+    load_true = np.asarray(load_true, float)
+    pv_true = np.asarray(pv_true, float)
+    g_today = np.asarray(g_today, float)
+    t_end = T if t_end is None else int(t_end)
+    ex = DayExecution.empty(d, soc_init, T) if out is None else out
+    soc = float(soc_init)
+    for t in range(int(t_start), t_end):
+        price = executor.price_at(t, price_fn)
+        c0, d0, r0 = executor.step(t, soc, load_true[t], pv_true[t], g_today[t], price)
+        c = 0.0 if c0 < CLIP_TOL else float(c0)
+        dis = 0.0 if d0 < CLIP_TOL else float(d0)
+        net = load_true[t] + c - g_today[t] - pv_true[t] - dis
+        ex.C[t], ex.D[t] = c, dis
+        ex.E[t], ex.W[t] = max(net, 0.0), max(-net, 0.0)
+        soc += ETA * c - dis / ETA
+        assert SOC_MIN - 1e-6 <= soc <= SOC_MAX + 1e-6, f"{d} 段 {t} 储电量越界：{soc}"
+        soc = min(max(soc, SOC_MIN), SOC_MAX)
+        ex.S[t] = soc
+        if ex.R is not None:
+            ex.R[t] = float(r0)
+    return ex
+
+
+def run_day(
+    d: date,
+    g_today: np.ndarray,
+    soc_init: float,
+    load_true: np.ndarray,
+    pv_true: np.ndarray,
+    load_pred: np.ndarray | None = None,
+    pv_pred: np.ndarray | object | None = None,
+    load_future: np.ndarray | None = None,
+    pv_future: np.ndarray | None = None,
+    solver=None,
+    step_minutes: int = 10,
+    n_seg: int = T,
+    *,
+    t_start: int = 0,
+    t_end: int | None = None,
+    out: DayExecution | None = None,
+    price_fn: Callable[[int], float | np.ndarray] | None = None,
+) -> DayExecution:
+    """Backward-compatible dispatcher for DP and legacy rolling-LP callers."""
+    # Compact DP form: run_day(d, g, soc, load, pv, price, executor).
+    if solver is None and isinstance(pv_pred, DPValueExecutor):
+        executor = pv_pred
+        price_true = load_pred if load_pred is not None else executor.price
+        if executor.price is None and price_true is not None:
+            executor.price = np.asarray(price_true, float)
+        return run_day_dp(d, g_today, soc_init, load_true, pv_true, price_true, executor,
+                          t_start=t_start, t_end=t_end, out=out, price_fn=price_fn)
+    if isinstance(solver, DPValueExecutor):
+        return run_day_dp(d, g_today, soc_init, load_true, pv_true,
+                          load_pred if load_pred is not None else solver.price,
+                          solver, t_start=t_start, t_end=t_end, out=out, price_fn=price_fn)
+    return run_day_rolling_lp(d, g_today, soc_init, load_true, pv_true, load_pred,
+                              pv_pred, load_future, pv_future, solver, step_minutes,
+                              n_seg, t_start=t_start, t_end=t_end, out=out, price_fn=price_fn)
 
 
 class DPValueExecutor:
@@ -156,9 +219,8 @@ class DPValueExecutor:
         return self
     def price_at(self, t, price_fn=None):
         if price_fn is not None:
-            try:
-                a=np.asarray(price_fn(t),float); return float(a[t]) if a.size>t else float(a[0])
-            except Exception: pass
+            a = np.asarray(price_fn(t), float)
+            return float(a) if a.ndim == 0 else float(a[t] if a.size > t else a[0])
         j = t - getattr(self, "t0", 0)
         return float(self.price[j]) if self.price is not None and j < self.price.size else 1.0
     def step(self, t, soc_prev, load, pv, g, price):
@@ -171,4 +233,4 @@ class DPValueExecutor:
         return 0.0, min(r, P_MAX_KWH, ETA*max(soc_prev-reserve,0.0)), reserve
 
 
-__all__ = ["DayExecution", "run_day", "DPValueExecutor"]
+__all__ = ["DayExecution", "run_day", "run_day_dp", "run_day_rolling_lp", "DPValueExecutor"]

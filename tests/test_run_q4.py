@@ -5,7 +5,7 @@ from datetime import date
 
 from src.data import SOC_INIT, SOC_MAX, SOC_MIN, T, load_attachment4
 from src.forecast_price import PerfectPriceSource, PriceForecaster
-from src.optimizer import StorageRollingSolver
+from src.executor import DPValueExecutor
 from src.results import write_result2, write_result3
 from src.run_q2 import Params as Q2Params
 from src.run_q2 import load_bundle as load_bundle_q2
@@ -149,23 +149,23 @@ def test_no_future_price_reaches_any_decision(bundle2, bundle3, att4):
 def test_no_decision_sees_a_price_segment_beyond_the_segment_it_decides(
     bundle3, att4, monkeypatch
 ):
-    """记录每次电价预测与每次滚动 LP 的段号：段 t 的求解之前，当天用过的
+    """记录每次电价预测与每次 DP 执行的段号：段 t 的决策之前，当天用过的
     已观测段数不得超过 t+1（即从不读取段 $\\ge t+1$ 的电价）。"""
     dates, prices = att4
     events: list[tuple[str, date | None, int]] = []
     predict = PriceForecaster.predict
-    solve = StorageRollingSolver.solve
+    step = DPValueExecutor.step
 
     def spy_predict(self, d, t_now=0, observed=None):
         events.append(("predict", d, int(t_now)))
         return predict(self, d, t_now, observed)
 
-    def spy_solve(self, t, *a, **kw):
-        events.append(("solve", None, int(t)))
-        return solve(self, t, *a, **kw)
+    def spy_step(self, t, *a, **kw):
+        events.append(("step", None, int(t)))
+        return step(self, t, *a, **kw)
 
     monkeypatch.setattr(PriceForecaster, "predict", spy_predict)
-    monkeypatch.setattr(StorageRollingSolver, "solve", spy_solve)
+    monkeypatch.setattr(DPValueExecutor, "step", spy_step)
     run_period_q3(
         D0,
         date(2025, 1, 2),
@@ -182,7 +182,7 @@ def test_no_decision_sees_a_price_segment_beyond_the_segment_it_decides(
             current = d
             seen[d] = max(seen.get(d, 0), t)
         else:
-            # 段 t 的滚动 LP 之前，当天最多只观测到段 t（即 t+1 个段）
+            # 段 t 的 DP 决策之前，当天最多只观测到段 t（即 t+1 个段）
             assert seen.get(current, 0) <= t + 1, f"段 {t} 之前读到了 {seen[current]} 段电价"
 
 

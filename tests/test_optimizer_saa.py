@@ -6,6 +6,7 @@ from src.optimizer import (
     StorageRollingSolver,
     solve_deterministic,
     solve_saa,
+    solve_saa_point,
 )
 
 
@@ -18,21 +19,21 @@ def test_saa_with_zero_residual_matches_deterministic_48h(att):
     """M=1、残差为零、次日曲线与当天相同时，SAA 退化为 48h 确定性 LP。"""
     price48 = np.tile(att.price, 2)
     L, PV = att.load_kwh, att.pv_kwh
-    saa = solve_saa(price48, L[None, :], PV[None, :], L, PV, SOC_INIT, with_point=True)
+    saa = solve_saa(price48, L[None, :], PV[None, :], L, PV, SOC_INIT)
+    point = solve_saa_point(price48, L, PV, L, PV, SOC_INIT)
     det = solve_deterministic(
         price48, np.tile(L, 2), np.tile(PV, 2), SOC_INIT, periodic=False
     )
     assert np.abs(saa.G0 - det.G[:T]).max() < 1e-4
-    assert saa.point_solution is not None
-    assert saa.point_solution.E.max() < 1e-6  # 紧急购电永不划算
-    assert np.minimum(saa.point_solution.C, saa.point_solution.D).max() < 1e-6
+    assert point.E.max() < 1e-6  # 紧急购电永不划算
+    assert np.minimum(point.C, point.D).max() < 1e-6
 
 
-def test_saa_point_solution_satisfies_balance_and_soc(att):
+def test_explicit_point_solution_satisfies_balance_and_soc(att):
     price48 = np.tile(att.price, 2)
     L, PV = att.load_kwh, att.pv_kwh
-    saa = solve_saa(price48, L[None, :], PV[None, :], L, PV, SOC_INIT, with_point=True)
-    pt = saa.point_solution
+    saa = solve_saa(price48, L[None, :], PV[None, :], L, PV, SOC_INIT)
+    pt = solve_saa_point(price48, L, PV, L, PV, SOC_INIT)
     load48, pv48 = np.tile(L, 2), np.tile(PV, 2)
     balance = pt.G + pt.E + pv48 + pt.D - load48 - pt.C - pt.W
     assert np.abs(balance).max() < 1e-6
@@ -58,6 +59,23 @@ def test_saa_first_stage_is_shared_across_scenarios(att):
     assert spread.G0.shape == (T,)
     assert spread.G0.sum() > tight.G0.sum()
     assert spread.G0.min() >= -1e-9
+
+
+def test_saa_is_invariant_when_identical_scenarios_are_repeated(att):
+    """重复相同场景不应改变 sample-average 目标中的正则权重。"""
+    price48 = np.tile(att.price, 2)
+    L, PV = att.load_kwh, att.pv_kwh
+    one = solve_saa(price48, L[None, :], PV[None, :], L, PV, SOC_INIT)
+    repeated = solve_saa(
+        price48,
+        np.repeat(L[None, :], 3, axis=0),
+        np.repeat(PV[None, :], 3, axis=0),
+        L,
+        PV,
+        SOC_INIT,
+    )
+    assert np.allclose(repeated.G0, one.G0, rtol=0.0, atol=1e-6)
+    assert repeated.objective == pytest.approx(one.objective, abs=1e-6)
 
 
 def test_rolling_lp_buys_emergency_in_cheap_segment_and_saves_storage():

@@ -1,0 +1,34 @@
+{
+ "prop1_convexity": {
+  "ok": true,
+  "detail": "抽样 t∈{0,36,72,108,132} 折线斜率增量最小值 0.00e+00 ≥ 0（凸 ⇔ 边际价值 -F' 非增）"
+ },
+ "prop1_lp_dp": {
+  "ok": true,
+  "detail": "F_0(6000)=35126.9486 vs LP=35126.9486，差 7.28e-12 元"
+ },
+ "prop2_surrogate": {
+  "ok": true,
+  "detail": "4 个指定日 12:00 重优化：min(不调整目标 − 重优化目标) = 56.6995 ≥ 0（不劣）"
+ },
+ "prop2_bill_monotone": {
+  "ok": true,
+  "detail": "逐级开放预报时刻的全年实际账单单调下降：1335.12万 > 1331.29万 > 1307.55万 > 1302.46万（数值观察，非定理）"
+ },
+ "prop3_lp_scale": {
+  "ok": true,
+  "detail": "问1 LP：0.5×/2× 电价下费用同比缩放，且原最优解仍属缩放后最优解集（解集不变）"
+ },
+ "prop3_saa_scale": {
+  "ok": true,
+  "detail": "SAA：电价与续存费率同乘 λ ⇒ 计划购电量不变（需终端费率同步缩放）"
+ },
+ "prop3_reserve_scale": {
+  "ok": true,
+  "detail": "执行器：R_t = argmin[H̄+5pηx] 在 (λH̄, λp) 下不变 ⇒ 因果动作不变"
+ },
+ "prop3_forecast_scale": {
+  "ok": true,
+  "detail": "电价预测：历史价格全乘 2 ⇒ 预测逐段乘 2（比值范围 2.000000–2.000000）"
+ }
+}

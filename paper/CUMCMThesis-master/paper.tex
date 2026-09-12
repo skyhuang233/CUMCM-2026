@@ -211,7 +211,7 @@ J^{\rm eval}(G)=\Gamma_\tau(G)+\frac1M\sum_\omega\left[\sum_{t\in\text{剩余当
 \section{指定日结果与执行解释}
 3月20日、6月21日、9月23日和12月21日均直接从对应完整年运行提取，不为报告日重置库存。下表保留全天计划、实际总费用、紧急电量及首末库存，完整10分钟采购和四小时充放电结果另存工作簿。
 \input{generated/report_day_tables.tex}
-\IfFileExists{../../results/m30/q3_baseline.trace.npz}{\resultfigure{fig_q3_day}{3月20日问3的计划与最终交付采购、紧急购电、真实库存及动态保留水平}{0.90}}{}
+\IfFileExists{../../results/latest/m30/q3_baseline.trace.npz}{\resultfigure{fig_q3_day}{3月20日问3的计划与最终交付采购、紧急购电、真实库存及动态保留水平}{0.90}}{}
 图中的采购曲线是在各发布时刻逐块承诺后的最终交付记录。储能保留水平由未来费用与当段紧急电价共同确定；负载和光伏差异、当时库存、功率限额均会改变缺口是否由储能覆盖，不能仅凭库存曲线判定某个单一因果机制。
 
 \section{数值验证、性能与局限}

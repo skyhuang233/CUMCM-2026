@@ -8,7 +8,7 @@ from matplotlib import font_manager
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA, OUT = ROOT / "results/m30", ROOT / "plot"
+DATA, OUT = ROOT / "results/latest/m30", ROOT / "plot"
 TABLES = ROOT / "paper/CUMCMThesis-master/generated"
 BRANCHES = {"q2": "问2", "q3": "问3", "q4_2": "问4-2", "q4_3": "问4-3"}
 VARIANTS = {"48h": "48h+$V$", "candidates": "候选重评", "legacy_means": "旧均值", "same_type": "同类型池"}

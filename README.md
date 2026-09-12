@@ -11,7 +11,7 @@
 3. **问 3 扩展**：在 6:00/12:00/18:00 用新光伏预报滚动重优化，只提交到下一预报时刻。
 4. **问 4 扩展**：4-2 在 0:00 冻结采购、在四个发布时刻更新价格与库存价值；4-3 同时重订剩余采购。价格残差与负载/光伏按完整发布路径配对。
 
-1 月重建历史预测和完整残差，储能待机；2--12 月为连续评分期。M=30 实验及完整精度产物保存在 `results/m30/`，每项摘要的 `complete_year` 标记全年完成状态，`verification.json` 记录整组产物的独立物理及账单核验。旧稿备份位于 `.scratch/m30-review/`。
+1 月重建历史预测和完整残差，储能待机；2--12 月为连续评分期。当前冻结的 M=30 完整精度矩阵保存在 `results/latest/m30/`，每项摘要的 `complete_year` 标记全年完成状态，`verification.json` 记录整组产物的独立物理及账单核验。旧稿备份位于 `.scratch/m30-review/`。
 
 ## 快速开始
 
@@ -65,13 +65,25 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m s
 长时全年任务可在每个完整日结束时原子保存检查点；中断后使用相同的模型、数据与日期参数恢复。检查点严格绑定源码/数据指纹，配置不一致会拒绝恢复：
 
 ```bash
-.venv/bin/python -u -m src.run_experiments --branch q3 --variant legacy_means --m 30 --name q3_legacy_means --checkpoint results/m30/checkpoints/q3_legacy_means.pkl --progress 1
-.venv/bin/python -u -m src.run_experiments --branch q3 --variant legacy_means --m 30 --name q3_legacy_means --checkpoint results/m30/checkpoints/q3_legacy_means.pkl --resume --progress 1
+.venv/bin/python -u -m src.run_experiments --branch q3 --variant legacy_means --m 30 --name q3_legacy_means --checkpoint results/latest/m30/checkpoints/q3_legacy_means.pkl --progress 1
+.venv/bin/python -u -m src.run_experiments --branch q3 --variant legacy_means --m 30 --name q3_legacy_means --checkpoint results/latest/m30/checkpoints/q3_legacy_means.pkl --resume --progress 1
 ```
 
 分支为 `q2/q3/q4_2/q4_3`；变体为 `baseline/48h/candidates/legacy_means/same_type`，问4另支持 `legacy_price/perfect`。每项生成 XLSX、逐日 JSON、全年 summary JSON、完整十分钟 NPZ；配置、数值源码与数据指纹均匹配且产物齐全时才复用。旧均值消融固定 K_load=6、K_pv=7，未在本轮重新调参。候选并行只分配五个独立候选，逐日库存演进仍顺序执行。
 
 论文在当前 macOS 环境可用 `/opt/homebrew/bin/tectonic paper.tex` 编译（工作目录 `paper/CUMCMThesis-master`）。中文正文显式选取宋体集合中的 SC Regular 字形并嵌入 PDF，避免误选不可嵌入的 Black 字形。
+
+## 实验产物与协作
+
+| 位置 | 用途 | 合作者应如何使用 |
+|---|---|---|
+| `results/latest/m30/` | 当前冻结的最终 M=30 矩阵：22 组完整全年实验、`verification.json`、消融比较 JSON | 论文图表、统计和复核唯一读取此目录；不要混入临时试跑文件 |
+| `results/latest/m30/*.summary.json` | 每组配置、源码/数据指纹、汇总费用与月度统计 | 先检查 `complete_year=true`，再引用费用 |
+| `results/latest/m30/*.trace.npz` | 334 天 × 144 段完整轨迹 | 用于物理平衡、账单与图表复核 |
+| `results/latest/m30/*.daily.json` 与 `*.xlsx` | 日度指标与便于人工查看的工作簿 | 用于日粒度分析和展示 |
+| `results/legacy/` | 旧默认导出、历史日志、远端下载副本和被替代的试跑 | 仅供追溯，不作为论文最新结论的数据源 |
+
+最终矩阵的 22 组由问2、问3、问4-2、问4-3各自的 `baseline/48h/candidates/legacy_means/same_type`，以及问4两个 `legacy_price` 对照组成。远端复用的 10 组保留各自产物内的原始源码指纹；它们与当前性能优化后的源码指纹不同，但已通过相同的 M=30、334 日、SOC、能量平衡与账单独立核验。运行 `PYTHONPATH=. .venv/bin/python .scratch/m30-review/validate_matrix.py` 可重新生成并检查 `results/latest/m30/verification.json`。
 
 ## 代码结构
 
@@ -96,7 +108,8 @@ src/
 └── run_q4.py            # 问 4 入口（波动电价）
 
 data/                    # 赛题附件（附件 1–4）
-results/                 # 输出结果（gitignored）
+results/latest/m30/      # 当前冻结的最终 22 组 M=30 结果
+results/legacy/          # 旧导出、历史日志、远端副本与被替代试跑
 tests/                   # 测试
 plot/                    # 论文插图（PDF）
 paper/                   # 论文 LaTeX 源码

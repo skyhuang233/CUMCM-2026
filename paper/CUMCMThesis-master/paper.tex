@@ -1,4 +1,4 @@
-% M=30 四问复现与独立增量实验；旧稿已保存在 .scratch/m30-review。
+% 微网四问：统一价值函数框架下的购电与储能调度（全面重写版）
 \PassOptionsToPackage{fontset=none}{ctex}
 \documentclass[withoutpreface,bwprint]{cumcmthesis}
 \setCJKmainfont[Path=/System/Library/Fonts/Supplemental/,FontIndex=6,BoldFont=Songti.ttc,BoldFeatures={FontIndex=1}]{Songti.ttc}
@@ -15,223 +15,55 @@
 \setlength{\emergencystretch}{2em}
 \usepackage{cumcm2026}
 \usepackage{url}
+\newtheorem{proposition}{命题}
 \graphicspath{{../../plot/}}
+% 缺图时显式画占位框（交稿前 U6 终检改为硬失败，绝不静默丢图）
+\newcommand{\safeincludegraphics}[2][width=0.9\textwidth]{%
+  \IfFileExists{../../plot/#2.pdf}{\includegraphics[#1]{#2}}{%
+  \fbox{\parbox[c][4cm][c]{0.8\textwidth}{\centering 缺图占位：\texttt{\detokenize{#2}}}}}}
 \input{generated/m30_numbers.tex}
-\providecommand{\QoneCost}{待完成}
-\providecommand{\QoneEnergy}{待完成}
-\providecommand{\QtwoCost}{待完成}
-\providecommand{\QthreeCost}{待完成}
-\providecommand{\QfourTwoCost}{待完成}
-\providecommand{\QfourThreeCost}{待完成}
-\newcommand{\resultfigure}[3]{\IfFileExists{../../plot/#1.pdf}{\begin{figure}[!htbp]\centering\includegraphics[width=#3\textwidth]{#1}\caption{#2}\label{fig:#1}\end{figure}}{}}
-\title{基于配对场景与连续动态规划的微网购电调控}
+\title{信息状态与未来费用函数：微网购电与储能调度的统一模型}
 \tihao{C}\baominghao{0000}\schoolname{XX大学}
 \membera{ }\memberb{ }\memberc{ }\supervisor{ }
 \yearinput{2026}\monthinput{9}\dayinput{12}
 \begin{document}
 \maketitle
 \begin{abstract}
-针对带储能非孤岛微网的计划购电、日内调整与缺口补购问题，本文以《微网电力调控\_四问完整稿》的明确方法为复现主线，建立预测、采购优化、因果执行与交付结算相衔接的四问方案。各分支统一采用10分钟步长；问2--4在一月重建历史预测与残差，2月1日从6000\,kWh库存开始连续执行至12月31日。
+微网购电的真正困难在于：普通购电必须提前承诺，而负载、光伏与电价在交付前仍会变化；一旦储能库存偏离计划轨迹，“按原计划继续”未必最优，此时需要回答“当前多一千瓦时库存对未来值多少钱”。单条最优轨迹无法回答这个定义在库存状态上的问题。为此，本文以信息状态 $\mathcal I_t$（已完成观测、已发布预报、当前储电量、可交易权限）为主线，构造库存上的未来费用函数，由它统一驱动四问的采购决策与逐段因果执行；全部结论以真实交付数据结算的连续全年（2 月 1 日至 12 月 31 日，334 日）实际账单评价。
 
-问1在确定性负载和光伏下建立含周期库存约束的线性规划，最优购电费为\QoneCost 元，另以连续凸分段线性动态规划独立复算。问2采用分解式负载预测、三日历史光伏均值与30条完整配对残差路径，通过样本平均近似两阶段代理模型冻结全天计划；储能按平均未来费用函数逐段执行，评分期费用为\QtwoCost 万元。问3组合凌晨正式光伏预报和历史预测，在0、6、12、18时重订尚未执行的购电量，每次前瞻完整24小时并允许跨午夜追索；B口径结算费用为\QthreeCost 万元。
+\textbf{针对问题一}，建立含周期库存约束的确定性线性规划（完整 min/s.t. 模型），最优全天购电费 \textbf{35126.95 元}，较无储能直购节省 \textbf{26.90\%}。证明其价值函数 $F_t(e)$ 凸、分段线性且边际价值单调（命题 1），据此以凸折线精确表示的连续动态规划独立复算，与线性规划最优值之差仅 $7.3\times10^{-12}$ 元，双方法互证了优化核的正确性。
 
-问4进一步加入配对价格残差。4-2采用净负荷回归价格预测，仅在0时采购，日内四次刷新库存价值，费用为\QfourTwoCost 万元；4-3采用AR(1)价格预测并同时重订采购，费用为\QfourThreeCost 万元。二者均使用交付段真实电价结算。
+\textbf{针对问题二}，以分解式负载预测（日电量水平 $\times$ 日内形状）与 30 条完整路径配对残差场景构造样本平均近似，在 0:00 冻结计划购电量；执行层将 $F_t$ 推广为场景平均未来费用函数 $\bar H_t(e)$，导出动态保留水平 $R_t$——缺口时储能只放电到 $R_t$ 为止，为未来更贵的缺口留存库存。主方法（48 小时时域 + 次日价值函数）全年实际费用 \textbf{1352.96 万元}，位于完美信息下界（1222.82 万元）之上 10.6\%，较同信息无储能方案节省 28.0\%。
 
-在固定参考基线后，分别检验48小时加次日价值函数、候选计划重评、旧均值预测与同类型场景池，波动电价分支另检验旧价格预测。组件作用以相同分支、相同评分期的单因子对照报告，不将全部增量预设为改进。所有新表图由保存的实验产物生成，实际账单与期末库存分开报告。
-\keywords{微网购电\quad 配对残差场景\quad 两阶段代理模型\quad 连续动态规划\quad 因果执行}
+\textbf{针对问题三}，每个预报时刻在冻结计划上重优化尚未执行的购电量（调增 1.5 倍价、调减付半价违约费），只提交到下一发布时刻。证明重优化在代理口径下不劣于不调整（命题 2）。全年实际费用 \textbf{1298.96 万元}，较问题二降低 54.01 万元；紧急购电费从 78.23 万元降至 19.16 万元——日内调整把 5 倍价的紧急缺口提前转化为 1.5 倍价的调增。逐级开放发布时刻的对照表明\textbf{确有必要引入其他时刻的预报}：6:00、12:00、18:00 的边际节省分别为 3.83、\textbf{23.74}、5.10 万元/年，12:00 一枝独秀源于光伏不确定性在午间峰值前被压缩、且当天尚余一半调整窗口。
+
+\textbf{针对问题四}，新增“日价格水平 $\times$ 日内形状”的电价预测层，价格残差与负载、光伏残差按同一历史发布时刻三通道配对。证明全部价格同比缩放时最优决策不变、费用同比缩放（命题 3）：策略形状只取决于价格的相对结构与可预测性。4-2（问题二权限）与 4-3（问题三权限）全年实际费用分别为 \textbf{1422.99 万元}与 \textbf{1369.30 万元}；与完美价格信息参照的同口径差距仅 0.62\% 与 0.68\%，价格预测误差的代价很小，因为易预测的日内形状决定决策、难预测的水平跳动几乎不改变决策。
+
+灵敏度分析表明：场景数 $M\ge20$ 后费用进入平台期，48 小时时域组件在四分支一致净省 2.4--4.1 万元，分解式负载预测是贡献最大的单一组件（14.5--21.2 万元）；全部参数仅用一月数据选定，杜绝信息泄漏。综上，四问是同一价值函数 $F_t\to\bar H_t\to\bar H_{t\mid\tau}\to\bar H_{t\mid\tau}(\cdot;p)$ 在信息逐级扩展下的四个实例：储能调度的本质不是追求一条标称最优轨迹，而是维护一个随信息状态更新的库存价值函数。
+\keywords{线性规划\quad 样本平均近似\quad 动态规划\quad 微网储能调度\quad 滚动重优化}
 \end{abstract}
 
-\section{问题分析与建模边界}
-微网的供电来源为外网购电、光伏和储能放电。日前采购须在每日0时承诺；交付时仍有缺口则按当段电价的5倍紧急购电，富余电量不能回售。储能将能量跨时段转移，但受到充放电功率、库存上下界与效率损耗约束。问3允许在规定发布时刻调整未来采购；问4增加电价不确定性。因此，采购方案、信息更新和真实执行必须分开处理，不能将优化过程中假想的未来动作直接写入账单。
+\input{sections/s01_restatement}
+\input{sections/s02_analysis}
+\input{sections/s03_assumptions}
+\input{sections/s05_q1}
+\input{sections/s06_q2}
+\input{sections/s07_q3}
+\input{sections/s08_q4}
+\input{sections/s10_reportdays}
+\input{sections/s09_sensitivity}
+\input{sections/s11_evaluation}
 
-本文保留原项目的数据读取、统一LP装配、结果输出和分块执行结构，预测规则、采购时域和连续DP按四问完整稿统一。本文的目的包括方法复现及组件检验；与参考稿费用的差异单独列出，不以近似一致代替逐位复现，也不把参考稿数字写成自己的计算结果。
-
-\subsection{共同假设}
-各时段内的功率按10分钟平均量处理。执行器在当段负载、光伏和交付电价已可观测的条件下响应，当段内可以完成充放电控制。历史拟合只访问发布时刻以前已经完成的观测；日内正式预报仅在发布后使用。电池效率在所有时段相同，忽略本题未提供参数的退化成本、自放电及设备启停成本。紧急购电仅补当段缺口，不用于给电池充电。
-
-\subsection{符号与量纲}
-\begin{table}[!htbp]\centering\small
-\caption{主要符号与单位}\label{tab:symbols}
-\begin{tabular}{cl}\toprule
-符号 & 含义 \\ \midrule
-$t,T$ & 10分钟段及一天段数，$T=144$ \\
-$L_t,PV_t$ & 负载、可用光伏电量（交流侧kWh） \\
-$G^0_t,G^a_t$ & 凌晨冻结计划、最终交付调整量（kWh） \\
-$C_t,D_t,E_t,W_t$ & 充电、放电、紧急购电、富余电量（交流侧kWh） \\
-$S_t$ & 段末内部库存（kWh），范围$[1200,10800]$ \\
-$p_t,\eta,Q$ & 电价（元/kWh）、效率$0.9$、段功率限额$5000/6$\,kWh \\
-$\tau,q_\tau$ & 发布小时与当天剩余段数，$q_\tau=144-6\tau$ \\
-$H_{t,\omega},\bar H_t$ & 路径未来费用函数及其等权平均 \\
-$R_t,V(e)$ & 动态保留水平、次日自由采购价值函数 \\
-\bottomrule\end{tabular}\end{table}
-输入功率统一乘$1/6$转成段电量；附件3整点预报先插值到段末，再转换一次。标签0:10表示$[0:00,0:10)$，0:00+1表示当天最后一段，输出改标签不移动数据。四小时累计充放电可能同时非零，不代表同一10分钟段同时充放电。
-
-\section{统一物理模型与实际账单}
-\subsection{能量平衡与库存转移}
-对交付采购$G_t$，每段满足
-\begin{align}
-G_t+E_t+PV_t+D_t&=L_t+C_t+W_t,\\
-S_t&=S_{t-1}+\eta C_t-D_t/\eta,\\
-0\le C_t,D_t\le Q,&\quad 1200\le S_t\le10800,\quad G_t,E_t,W_t\ge0.
-\end{align}
-问1取$E_t=0$且$S_0=S_T=6000$。问2--4不施加日循环约束，当天末库存结转到次日；评分期初库存统一为6000\,kWh。一月默认待机，只用于历史预测、完整残差和方法所需校准，不能把一月试运行形成的库存带入二月。
-
-\subsection{B口径调整与一次结算}
-问1、问2和问4-2的实际费用为
-\begin{equation}C_A=\sum_t p_tG^0_t+5p_tE_t.\end{equation}
-问3和问4-3采用B口径：取消部分不再收原计划费，仅收一半电价的违约费；新增部分按1.5倍电价购入。因此
-\begin{align}
-C_B=\sum_t\big[&p_t\min(G^0_t,G^a_t)+0.5p_t(G^0_t-G^a_t)^+\nonumber\\
-&+1.5p_t(G^a_t-G^0_t)^++5p_tE_t\big].\label{eq:bill}
-\end{align}
-上式也等于$\sum_t p_t[G^a_t+0.5|G^a_t-G^0_t|+5E_t]$。每个交付段只按最终执行量相对原计划结算一次；中途覆盖的未来临时方案不累计交易费。问4使用交付段真实电价，预测终端续存价值不作为实际收入。
-
-\section{问1：确定性采购及独立DP复算}
-\subsection{线性规划}
-以$\min\sum_t p_tG_t$为目标，在能量平衡、充放电限额和周期库存条件下求解LP。模型不增加$\varepsilon(C+D+W)$等经济目标之外的正则费；实际动作恢复时消除不必要的同时充放电。
-
-\subsection{连续库存动态规划}
-令内部库存增量$x=e'-e$对应的交流侧需求为
-\begin{equation}\psi(x)=\begin{cases}x/\eta,&x\ge0,\\ \eta x,&x<0.\end{cases}\end{equation}
-从末端向前递推
-\begin{equation}F_t(e)=\min_{e'}\{p_t[L_t-PV_t+\psi(e'-e)]^++F_{t+1}(e')\},\end{equation}
-其中$e'$满足物理边界与段功率限额；$F_{T+1}$在6000处为0，其余为$+\infty$。使用有限定义域上的凸分段线性表示，允许单点定义域，采用斜率合并的下确界卷积及库存域截取，不使用库存网格或巨大终端罚项。正向恢复动作并独立核对费用与周期库存。
-
-最优日购电量为\QoneEnergy\,kWh，购电费为\QoneCost 元。LP与DP费用相差不足$10^{-6}$元；同一最优值可以有不同最优动作，故表内动作采用独立DP恢复的一组可行解。
-\input{generated/q1_tables.tex}
-\resultfigure{fig_q1_day}{问1电价、负载与光伏、最优购电和库存轨迹}{0.88}
-
-\section{问2：配对场景下的计划购电与因果执行}
-\subsection{分解负载与三日光伏}
-根据一月前14日的平均日电量识别低负载星期类别，15日起固定周五、周六为$k=0$，其余为$k=1$。设$B_i=\sum_tL_{i,t}$，$I_d$为此前最近三个同类型日，$J_d$为此前35天内发生类型切换的日期，计算
-\begin{align}
-\hat s_{d,t}&=\frac{\sum_{i\in I_d}L_{i,t}}{\sum_{i\in I_d}B_i},\\
-\beta_d&=\operatorname{median}_{i\in J_d}\frac{\ln(B_i/B_{i-1})}{k_i-k_{i-1}},\\
-\hat B_d&=B_{d-1}\exp[\beta_d(k_d-k_{d-1})],\qquad \hat L_{d,t}=\hat B_d\hat s_{d,t}.
-\end{align}
-次日预测递推使用当日预测日电量，不使用尚未结束的当日真实总量。一月15日以前采用当时可得的同星期历史均值，样本不足时回退到此前最多七日均值。光伏采用此前最多三个完整日的逐段均值。
-
-\subsection{完整路径残差}
-历史预测须按历史当时可得信息形成，路径全部交付后才计算残差。问2在日初选取此前最近30条完整整日配对负载、光伏残差，等权叠加到当前预测；对负负载、负光伏截零。前期不足30条时使用当时可得路径，不把未完成路径当成历史样本。一月1日无历史预测，不纳入残差库。每条负载与光伏残差来自同一历史日期，保留日内与通道间的关联。
-
-\subsection{SAA两阶段代理模型}
-全天计划$G^0$在各场景共享，储能和缺口补购按场景设置追索变量。24小时基线目标为
-\begin{equation}
-J_2=\sum_t p_tG^0_t+\frac1M\sum_{\omega=1}^M\left(\sum_t5p_tE_{\omega,t}-vS_{\omega,T}\right),\qquad v=0.481548.
-\end{equation}
-路径追索允许该路径内完美预见，故它是多阶段问题的乐观代理。其优化目标、实际因果执行账单以及全量未来真值下的离线最优值是不同量；不将某批样本的SAA值称为评分年实际费用的已证下界。
-
-\subsection{未来费用与动态保留水平}
-当天采购固定后，对每条场景递推
-\begin{equation}
-H_{u,\omega}(e)=\min_x\{\phi_{u,\omega}(x)+H_{u+1,\omega}(e+x)\},\qquad
-\bar H_u(e)=\frac1M\sum_\omega H_{u,\omega}(e).
-\end{equation}
-当天固定采购段记$r=L-PV-G$，单段费用为$5p[r+\psi(x)]^+$，缺口只允许放电、富余只允许充电；功率和库存边界保持不变。跨午夜未签约段则允许自由采购，单段费用为$p[L-PV+\psi(x)]^+$。基线前瞻末端取$-ve$。
-
-实际执行只使用当前段已观测的净缺口和电价，定义
-\begin{equation}
-R_t=\max\arg\min_{1200\le z\le10800}\{5p_t\eta z+\bar H_{t+1}(z)\}.
-\end{equation}
-若$r_t\le0$，取$C_t=\min(-r_t,Q,(10800-S_{t-1})/\eta)$且$D_t=E_t=0$；若$r_t>0$，取
-\begin{equation}D_t=\min\{r_t,Q,\eta[S_{t-1}-R_t]^+\},\quad C_t=0,\quad E_t=r_t-D_t.\end{equation}
-富余量由平衡式计算。该规则产生互斥充放电动作，紧急采购只补当前缺口。保留水平随库存机会成本而变化，不能用一个固定80\%需求分位概括具有储能耦合的全天最优采购。
-
-\section{问3：正式预报、跨午夜前瞻与调整采购}
-\subsection{发布预报与组合预测}
-附件3发布后第$h$小时预报对应发布时刻加$h$的整点。以发布时刻已观测光伏为左锚点，将24小时整点预报插值到10分钟段末。0时采用
-\begin{equation}\widehat{PV}=w\widehat{PV}^{F}+(1-w)\widehat{PV}^{H},\qquad w=0.388815,\end{equation}
-其中$F$是正式预报，$H$是三日历史预测，二月起固定该权重。一月历史预测的组合权重由各历史发布时刻以前已完成的配对误差估计；无可用误差时取0，不能把一月底校准权重倒灌到历史残差。6、12、18时直接采用最新正式预报。
-
-\subsection{完整24小时滚动采购}
-每次更新向前完整24小时；例如18时更新覆盖当天18--24时及次日0--18时。当天剩余$q_\tau$段采购跨场景共享，跨午夜次日采购按场景追索，不提前提交。目标写为
-\begin{equation}
-J_\tau=\Gamma_\tau+\frac1M\sum_\omega\left[\sum_{u>q_\tau}p_{\omega,u}\widetilde G_{\omega,u}
-+\sum_{u=1}^{144}5p_{\omega,u}E_{\omega,u}-vS_{\omega,144}\right].
-\end{equation}
-$\Gamma_0$为全天计划费；日内$\Gamma_\tau$为剩余当天按式\eqref{eq:bill}计算的普通购电费。只提交到下一个发布时刻，之后的临时方案可以再次覆盖。每次都从真实当前库存开始优化，保留$G^0$不变。
-
-场景库按发布小时分组，每次只选同发布小时、完整24小时已经实现的30条配对残差。跨午夜残差的可用性按准确结束时刻判断。对照发布集合为$\{0\}$、$\{0,6\}$、$\{0,6,12\}$和$\{0,6,12,18\}$；相邻组合差异衡量该固定增加顺序下的信息与调整机会价值，不是对任意排序都不变的独立贡献。
-
-\section{问4：联合价格场景与分支权限}
-\subsection{价格水平与形状}
-对此前35个完整日计算日价格水平$\ell_i=T^{-1}\sum_t p_{i,t}$，并平均归一化日内形状$\chi_{d,t}$。4-2用历史当时预测的净负荷建立
-\begin{equation}\hat\ell_{d|\tau}=a_c+\rho_c\ell_{d-1}+b_c\widehat N_{d|\tau}/10^5,\qquad
-\hat p_{d,t|\tau}=\hat\ell_{d|\tau}\chi_{d,t}.
-\end{equation}
-$\widehat N_{d|\tau}$由当日已观测净负荷与剩余预测量组成，历史回归输入也重建历史当时的预测，不能替换为历史真实全天净负荷。4-3使用不含净负荷项的AR(1)日价格水平模型。日内根据最近已完成段的预测误差作衰减修正；样本不足或回归退化时按因果回退规则处理，价格下限为$10^{-4}$。
-
-负载、光伏、价格残差以同一历史发布时刻的完整路径配对。优化中普通采购费用使用场景均价，路径内缺口及跨午夜费用使用各自场景价格。实际结算始终使用附件4交付价格。
-
-\subsection{采购与价值更新的区别}
-4-2只在0时冻结采购，不读取附件3；0、6、12、18时更新价格、价格场景和库存未来费用，并不获得日内采购调整权。4-3在四次时刻同时更新光伏预报、价格及采购。两分支的库存续存系数为价格场景早间0--5时均价除以$\eta$：0时使用当日早间，日内使用预测覆盖的次日早间30个10分钟段。
-
-四分支费用可以并列比较，但4-2与4-3同时改变预测规则、可得光伏信息与采购权限，差额不能严格归因为某一个因素。仅预知价格而仍沿用近似采购和执行算法的策略只能称为价格信息参照；严格离线下界须在全量未来净负荷和价格已知时优化全评分期自由采购。
-
-\section{全年复现与结果核对}
-\subsection{实验口径与完整性}
-所有主实验固定$M=30$、10分钟执行、一月待机和二月初6000\,kWh库存，统计2月1日至12月31日的334个评分日（48096段）。当日末库存连续结转，年末不强制清空，不把优化终端残值冲减实际账单。额外记录末库存，使具有不同跨日保留行为的组件可以按同一事实边界比较。
-
-实验保存配置与数值源码、输入数据指纹，完整精度的$G^0,G^a,C,D,S,E,W,R,p$轨迹、逐日摘要、月度费用和结果工作簿。由轨迹重算每笔账单并核对逐日、月度及总费用。问3较少发布时刻的已完成运行由终端完整日志和工作簿导入，总费用精度为分，不补造其未保存的十分钟轨迹。
-\input{generated/baseline_tables.tex}
-\resultfigure{fig_branch_costs}{四分支实际费用。横向差异涉及信息、交易权限及价格环境，不作单因素因果归因}{0.86}
-\resultfigure{fig_monthly_costs}{相同334日评分窗口下的月度费用}{0.90}
-
-参考对照仅采用指定的四问完整稿，不使用早期两问版本。表\ref{tab:reference}将参考稿值与本次输出分列。接近的总费用支持主线复现，但小额偏差尚不能仅凭总账单归因到求解器或某条预测规则；尤其应区分同最优目标下不同采购解对后续执行轨迹的影响。
-
-\subsection{问3发布时刻的边际比较}
-\input{generated/issues_tables.tex}
-\resultfigure{fig_q3_issues}{问3逐步增加发布时刻的总费用及相邻节省，所有组合均连续执行全年}{0.92}
-这些对照固定预测方法、场景构造、终端价值与结算方式。边际节省来自新增信息、当时真实库存以及采购调整共同作用，不能直接等同于单独光伏预测精度的改善。该组结果用于回答发布时刻在当前数据和增加顺序下的相对价值，不外推普遍的预报资源投资排序。
-
-\section{旧方案组件的单因子消融}
-\subsection{增量定义}
-\begin{enumerate}
-\item 48h+$V(e)$：0时覆盖当天与次日；日内覆盖当天剩余段及次日全部段。次日为共用点预测曲线、自由采购及零末端价值。精确DP构造次日$V(e)$，为当天午夜库存定价；执行只模拟当前剩余段，避免重复计算次日费用。这是时域与终端定价的整体组件。
-\item 候选计划重评：构造$G(a)=(1-a)G^s+aG^d$，$a\in\{0,0.25,0.5,0.75,1\}$。各候选独立重算平均未来费用，沿同批场景因果执行当前剩余日，并比较费用。$G^d$来自真正零残差点预测，不用截零后的场景均值替代。
-\item 旧均值预测：用原项目负载日类型均值和光伏历史均值替换基线点预测，并按该配置重新形成历史残差。固定$K_{\rm load}=6,K_{\rm pv}=7$，属于未重新调参的组件对照，不声称本轮一月重新选优，更不使用评分年结果选参。
-\item 同类型池：仅替换历史路径选择规则，保持完整实现条件、三通道配对与等权。同类型历史不足30条时使用当时可得的完整路径，早期实际场景数也随之减少，因此该对照衡量整条选择规则的效果。
-\item 旧价格：仅在问4替换为原项目价格水平修正规则，其余保持本分支基线。
-\end{enumerate}
-
-\subsection{候选评分中的路径关联}
-设$K_{\tau,\omega}(e)$为某历史路径从当前午夜到本轮前瞻末端的自由采购费用。候选执行使用共同$\bar H$，但其模拟午夜库存$S^G_{\omega,T}$须进入该场景自己的$K$，再取均值：
-\begin{equation}
-J^{\rm eval}(G)=\Gamma_\tau(G)+\frac1M\sum_\omega\left[\sum_{t\in\text{剩余当天}}5p_{\omega,t}E^G_{\omega,t}
-+K_{\tau,\omega}(S^G_{\omega,T})\right].
-\end{equation}
-把$K_{\tau,\omega}$替换为平均$\bar K$会破坏跨午夜关联。0时线性续存基线取$K=-vS$；48h增量才使用各场景共用的$V(S)$。候选评分是近似策略选择标准，不是当前真实账单。
-
-\subsection{消融结果与保留原则}
-每个实验只改变一个组件，不叠加多个开关。表中的正费用增量表示比同分支基线更贵，负值表示便宜。结果是本评分期上的回顾性组件比较；不能据此把全年表现最优的组合包装为事前已经冻结的方案。旧均值参数和参考基线方法在试验前固定，滚动历史拟合仍按当时可得信息继续。
-\input{generated/ablation_tables.tex}
-\resultfigure{fig_ablations}{四分支单因子消融：相对各自基线的实际费用变化}{0.96}
-\IfFileExists{generated/ablation_findings.tex}{\input{generated/ablation_findings.tex}}{}
-
-\section{指定日结果与执行解释}
-3月20日、6月21日、9月23日和12月21日均直接从对应完整年运行提取，不为报告日重置库存。下表保留全天计划、实际总费用、紧急电量及首末库存，完整10分钟采购和四小时充放电结果另存工作簿。
-\input{generated/report_day_tables.tex}
-\IfFileExists{../../results/latest/m30/q3_baseline.trace.npz}{\resultfigure{fig_q3_day}{3月20日问3的计划与最终交付采购、紧急购电、真实库存及动态保留水平}{0.90}}{}
-图中的采购曲线是在各发布时刻逐块承诺后的最终交付记录。储能保留水平由未来费用与当段紧急电价共同确定；负载和光伏差异、当时库存、功率限额均会改变缺口是否由储能覆盖，不能仅凭库存曲线判定某个单一因果机制。
-
-\section{数值验证、性能与局限}
-\subsection{独立核验与性能处理}
-针对非网格初值、零电价、单点终端、固定采购与跨午夜自由采购，以独立LP对照连续DP。750个对照的最大费用绝对差为$3.64\times10^{-12}$元，另有143项自动化测试通过。问1额外核对正向恢复动作的物理平衡、周期库存及费用。集成检查验证问4的场景形状、四次价值更新、采购次数、终端设置与真实结算。
-
-性能优化只去除冗余计算：无候选重评时直接构造平均未来费用，不执行会被丢弃的候选模拟；无需点预测解时不额外求LP。断点合并增加向量化快速路径，缓存斜率，并直接计算动态保留水平。固定M=30、144段微基准上，旧断点循环与仿射保留水平计算的墙钟中位耗时为1.207秒，优化后为1.014秒，减少约16\%；该数值仅表示两处局部优化，不代表全年运行或全部模块的加速比。新旧评分及费用曲线逐元素相同。
-
-有限值、断点单调性和凸性检查仍启用。对极近断点，斜率差分会放大费用值的机器舍入误差，因此遇到疑似非凸时在费用尺度核对弦线不等式；仅允许浮点舍入范围的误差，不移动断点、不投影费用曲线。真实非凸峰值仍会被拒绝。此项修复由全年运行触发，不能仅用短窗口通过替代全年验收。
-
-\subsection{适用范围}
-SAA路径追索与平均未来费用具有乐观性，本文没有给出多阶段随机最优保证。单一评分年缺少跨年份外部验证，单因子收益也不保证可加。价格与信息参照必须与严格离线下界区分；跨不同电价环境的费用变化不能解释为不可压缩的“信息租金”。末库存单列报告，终端定价仍是采购策略的一部分。
-
-官方附件5尚未提供，结果工作簿按题面重建，因此模板格式对齐尚未最终确认。当前不纳入在线情景权重、附录变体、72小时敏感性或未经本次复算的旧执行器比较。
-
-\begin{thebibliography}{9}
-\bibitem{reference} 微网电力调控\_四问完整稿[Z]. 本项目指定参考稿，31页.
-\bibitem{problem} 2026年全国大学生数学建模竞赛C题及附件1--4[Z].
-\bibitem{saa} Shapiro A, Dentcheva D, Ruszczyński A. Lectures on Stochastic Programming: Modeling and Theory[M]. SIAM, 2009.
-\bibitem{convex} Rockafellar R T. Convex Analysis[M]. Princeton University Press, 1970.
-\bibitem{scipy} Virtanen P, et al. SciPy 1.0: Fundamental algorithms for scientific computing in Python[J]. Nature Methods, 2020, 17:261--272.
+\begin{thebibliography}{15}
+\bibitem{problem} 2026年高教社杯全国大学生数学建模竞赛C题及附件1--4[Z]. 2026.
+\bibitem{saa-book} Shapiro A, Dentcheva D, Ruszczy\'nski A. Lectures on Stochastic Programming: Modeling and Theory[M]. Philadelphia: SIAM, 2009.
+\bibitem{rockafellar} Rockafellar R T. Convex Analysis[M]. Princeton: Princeton University Press, 1970.
+\bibitem{scipy} Virtanen P, Gommers R, Oliphant T E, et al. SciPy 1.0: Fundamental algorithms for scientific computing in Python[J]. Nature Methods, 2020, 17(3): 261--272.
 \end{thebibliography}
+
+\newpage
+\appendix
+\section{支撑材料文件列表与源程序}
+支撑材料包含：全部源程序（\texttt{src/} 目录：数据读取、优化核、预测与场景、DP 价值执行器、结算与结果导出）、结果文件 result1--result4-3.xlsx、全年实验汇总与独立复核记录。核心求解环境为 Python 3.13 + SciPy（HiGHS 线性规划）。以下给出优化核与执行器的关键源代码，完整代码见支撑材料。
+% U6 终检时插入 lstlisting 源码清单
 \end{document}

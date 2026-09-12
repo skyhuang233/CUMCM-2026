@@ -1,0 +1,13 @@
+\begin{proposition}[价格同比缩放不变性]\label{prop:scale}
+设全部价格输入同乘 $\lambda>0$：历史与真实电价 $p\mapsto\lambda p$（紧急电价保持 5 倍关系、调整费保持 $1.5$ 与 $0.5$ 倍关系），续存费率 $v\mapsto\lambda v$。则 (a) 各采购线性规划（问 1 确定性 LP、问 2 SAA、问 3 重优化）的最优解集不变、最优费用同乘 $\lambda$；(b) 价格预测层输出同乘 $\lambda$；(c) 未来费用函数 $\bar H_t\mapsto\lambda\bar H_t$，动态保留水平 $R_t$ 不变，DP 价值执行器的因果动作逐段不变；(d) 实际账单同乘 $\lambda$。即策略形状只由价格的相对结构决定，与价格水平无关。
+\end{proposition}
+
+\begin{proof}
+(a) 三个线性规划的约束（能量平衡、库存递推、界）均不含价格；价格只出现在目标向量中，且各项费用（普通购电 $p$、调增 $1.5p$、调减 $-0.5p$、紧急 $5p$、续存 $-v$）对 $\lambda$ 一次齐次，故目标向量整体乘 $\lambda$，最优解集不变、最优值乘 $\lambda$。
+
+(b) 价格预测为近 $K_p$ 个完整历史日的水平均值与归一化形状之积再乘水平因子（式\eqref{eq:q4price}）；水平、形状归一化与回归修正各环节均为历史价格的一次齐次函数，故输出乘 $\lambda$。
+
+(c) $\bar H_t$ 由逐段下确界卷积生成：单段动作费用（固定采购段 $5p[r+\psi(x)]^+$、自由段 $p[L-V+\psi(x)]^+$）与终端项 $-\lambda ve$ 均对 $\lambda$ 一次齐次；下确界卷积与逐点平均都与正常数因子可交换，逆向归纳得 $\bar H_t\mapsto\lambda\bar H_t$。于是保留水平目标 $\lambda[\bar H_{t+1}(z)+5p_t\eta z]$ 的最小点集不变，$R_t$ 不变，执行动作逐段不变。
+
+(d) 动作不变、结算价格乘 $\lambda$，账单各项一次齐次，总费用乘 $\lambda$。
+\end{proof}

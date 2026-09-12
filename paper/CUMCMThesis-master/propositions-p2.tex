@@ -1,0 +1,7 @@
+\begin{proposition}[重优化的代理不劣性]\label{prop:readjust}
+固定发布时刻 $\tau$ 的信息状态（同一场景集、同一未来预测、同一当前储电量与冻结计划 $G^0$）。式\eqref{eq:q3lp} 的重优化线性规划的最优值不超过不调整方案（$\Delta^\pm\equiv0$，即 $G^a=G^0$）的代理费用；差值即该发布时刻在代理口径下的信息价值，非负。
+\end{proposition}
+
+\begin{proof}
+取 $\Delta^+=\Delta^-=0$，其余变量取不调整方案的第二阶段最优追索值，则该组取值满足式\eqref{eq:q3lp} 的全部约束，是其可行解，目标值恰为不调整方案的代理费用。线性规划最优值不超过任一可行解的目标值，命题得证。
+\end{proof}

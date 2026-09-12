@@ -1,0 +1,128 @@
+[
+  {
+    "branch": "q2",
+    "variant": "48h",
+    "total_cost": 13529635.249530979,
+    "delta_yuan": -36761.01002467796,
+    "delta_percent": -0.2709710767793982
+  },
+  {
+    "branch": "q2",
+    "variant": "candidates",
+    "total_cost": 13566396.259555656,
+    "delta_yuan": 0.0,
+    "delta_percent": 0.0
+  },
+  {
+    "branch": "q2",
+    "variant": "legacy_means",
+    "total_cost": 13770638.368048685,
+    "delta_yuan": 204242.1084930282,
+    "delta_percent": 1.5055000943907104
+  },
+  {
+    "branch": "q2",
+    "variant": "same_type",
+    "total_cost": 13608513.170933843,
+    "delta_yuan": 42116.911378186196,
+    "delta_percent": 0.31045025202268167
+  },
+  {
+    "branch": "q3",
+    "variant": "48h",
+    "total_cost": 12989550.642386504,
+    "delta_yuan": -35046.205728502944,
+    "delta_percent": -0.26907708650939954
+  },
+  {
+    "branch": "q3",
+    "variant": "candidates",
+    "total_cost": 13022622.339225277,
+    "delta_yuan": -1974.508889729157,
+    "delta_percent": -0.015159846502388434
+  },
+  {
+    "branch": "q3",
+    "variant": "legacy_means",
+    "total_cost": 13169849.582187945,
+    "delta_yuan": 145252.73407293856,
+    "delta_percent": 1.1152186571821634
+  },
+  {
+    "branch": "q3",
+    "variant": "same_type",
+    "total_cost": 13071951.059061097,
+    "delta_yuan": 47354.21094609052,
+    "delta_percent": 0.36357525302553906
+  },
+  {
+    "branch": "q4_2",
+    "variant": "48h",
+    "total_cost": 14229899.73275636,
+    "delta_yuan": -40706.980557015166,
+    "delta_percent": -0.28525052490612535
+  },
+  {
+    "branch": "q4_2",
+    "variant": "candidates",
+    "total_cost": 14270606.713313375,
+    "delta_yuan": 0.0,
+    "delta_percent": 0.0
+  },
+  {
+    "branch": "q4_2",
+    "variant": "legacy_means",
+    "total_cost": 14482173.0076522,
+    "delta_yuan": 211566.2943388261,
+    "delta_percent": 1.482531882414299
+  },
+  {
+    "branch": "q4_2",
+    "variant": "same_type",
+    "total_cost": 14328345.083085256,
+    "delta_yuan": 57738.36977188103,
+    "delta_percent": 0.4045964613264521
+  },
+  {
+    "branch": "q4_2",
+    "variant": "legacy_price",
+    "total_cost": 14276131.675467454,
+    "delta_yuan": 5524.962154079229,
+    "delta_percent": 0.038715678072221454
+  },
+  {
+    "branch": "q4_3",
+    "variant": "48h",
+    "total_cost": 13693011.591272632,
+    "delta_yuan": -23960.446769962087,
+    "delta_percent": -0.17467737561548047
+  },
+  {
+    "branch": "q4_3",
+    "variant": "candidates",
+    "total_cost": 13716937.074094135,
+    "delta_yuan": -34.96394845843315,
+    "delta_percent": -0.0002548955291405733
+  },
+  {
+    "branch": "q4_3",
+    "variant": "legacy_means",
+    "total_cost": 13861895.01361449,
+    "delta_yuan": 144922.97557189688,
+    "delta_percent": 1.0565230808225612
+  },
+  {
+    "branch": "q4_3",
+    "variant": "same_type",
+    "total_cost": 13770829.193998683,
+    "delta_yuan": 53857.1559560895,
+    "delta_percent": 0.3926315210581627
+  },
+  {
+    "branch": "q4_3",
+    "variant": "legacy_price",
+    "total_cost": 13720788.176615432,
+    "delta_yuan": 3816.1385728381574,
+    "delta_percent": 0.027820560997386994
+  }
+]

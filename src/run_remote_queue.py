@@ -109,7 +109,7 @@ def _run_one(spec: dict[str, Any], out: Path, log_dir: Path, root: Path) -> dict
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the remaining bounded M30 experiment queue")
-    parser.add_argument("--out-dir", default="results/m30")
+    parser.add_argument("--out-dir", default="results/latest/m30")
     parser.add_argument("--log-dir", default=None)
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--max-workers", type=int, default=4)

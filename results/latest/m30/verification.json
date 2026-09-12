@@ -1,0 +1,183 @@
+{
+  "required_count": 22,
+  "complete_count": 22,
+  "missing": [],
+  "checks": [
+    {
+      "name": "q2_baseline",
+      "total_cost": 13566396.259555656,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q2_48h",
+      "total_cost": 13529635.249530979,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q2_candidates",
+      "total_cost": 13566396.259555656,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "5effad8fcdfe266395e15cf09009837ecc17366072309119c4f3eb6cc4196aed"
+    },
+    {
+      "name": "q2_legacy_means",
+      "total_cost": 13770638.368048685,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q2_same_type",
+      "total_cost": 13608513.170933843,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q3_baseline",
+      "total_cost": 13024596.848115006,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "7a5fe307e94661abd3264cf9b189f6e32b87e62cda0bd0109671a456b9e17a90"
+    },
+    {
+      "name": "q3_48h",
+      "total_cost": 12989550.642386504,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 4.547473508864641e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q3_candidates",
+      "total_cost": 13022622.339225277,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q3_legacy_means",
+      "total_cost": 13169849.582187945,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q3_same_type",
+      "total_cost": 13071951.059061097,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 4.547473508864641e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_2_baseline",
+      "total_cost": 14270606.713313375,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q4_2_48h",
+      "total_cost": 14229899.73275636,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q4_2_candidates",
+      "total_cost": 14270606.713313375,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "d8ae840d551f44f7297b222fc2980f2f412d6ac50a72297fd713ddd1bb12b54d"
+    },
+    {
+      "name": "q4_2_legacy_means",
+      "total_cost": 14482173.0076522,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_2_same_type",
+      "total_cost": 14328345.083085256,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_3_baseline",
+      "total_cost": 13716972.038042594,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "5effad8fcdfe266395e15cf09009837ecc17366072309119c4f3eb6cc4196aed"
+    },
+    {
+      "name": "q4_3_48h",
+      "total_cost": 13693011.591272632,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 1.862645149230957e-09,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_3_candidates",
+      "total_cost": 13716937.074094135,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "7a5fe307e94661abd3264cf9b189f6e32b87e62cda0bd0109671a456b9e17a90"
+    },
+    {
+      "name": "q4_3_legacy_means",
+      "total_cost": 13861895.01361449,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_3_same_type",
+      "total_cost": 13770829.193998683,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_2_legacy_price",
+      "total_cost": 14276131.675467454,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    },
+    {
+      "name": "q4_3_legacy_price",
+      "total_cost": 13720788.176615432,
+      "stock_error": 9.094947017729282e-13,
+      "balance_error": 3.410605131648481e-13,
+      "bill_error": 0.0,
+      "source_sha256": "14bc1321a86b573c17af57b886a22cfd04a330286b842a235b6361a501130028"
+    }
+  ]
+}

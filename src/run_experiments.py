@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--branch", required=True, choices=("q2", "q3", "q4_2", "q4_3"))
     parser.add_argument("--variant", default="baseline", choices=("baseline", "48h", "candidates", "legacy_means", "same_type", "legacy_price", "perfect"))
     parser.add_argument("--name", required=True)
-    parser.add_argument("--out-dir", default="results/m30")
+    parser.add_argument("--out-dir", default="results/latest/m30")
     parser.add_argument("--end", type=date.fromisoformat, default=date(2025, 12, 31))
     parser.add_argument("--m", type=int, default=30)
     parser.add_argument("--k-load", type=int, default=6)

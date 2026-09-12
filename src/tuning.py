@@ -31,7 +31,7 @@ K_LOAD_GRID = (2, 3, 4, 5, 6)
 K_PV_GRID = (3, 4, 5, 6, 7)
 KP_GRID = (2, 3, 4, 6, 8)  # 问 4 的电价基准窗口 $K_p$
 M_GRID = (6, 12, 20)
-HORIZON_GRID = (1, 2, 3)  # 24h / 48h / 72h
+HORIZON_GRID = (1, 2)  # 24h / 48h
 
 
 @dataclass
@@ -85,7 +85,17 @@ class TuningResult:
 
 
 def _january(bundle: Bundle, params: Params, end: date = JAN_END) -> PeriodResult:
-    return run_period(WARMUP_START, end, params, bundle, soc_init=SOC_INIT)
+    """Independent calibration run.
+
+    It deliberately enables only increment settings and is never reused as
+    the February production state; callers construct a fresh baseline run.
+    """
+    calibration = replace(
+        params,
+        reference_baseline=False,
+        calibration=True,
+    )
+    return run_period(WARMUP_START, end, calibration, bundle, soc_init=SOC_INIT)
 
 
 def _score(res: PeriodResult, score_from: date) -> tuple[float, float, float]:
@@ -110,10 +120,9 @@ def select_k(
 ) -> TuningResult:
     """1 月网格搜索 K_L, K_P，取计分窗口内实际总费用（计划费 + 紧急费）最小者。
 
-    每个候选都从 1 月 1 日、SOC=6000 起跑完全相同的预热流程，只是 `score_from`
-    之前的日子不计入得分：1 月 1 日无任何历史（只能用附件 1 先验）、1 月 2–7 日的
-    残差库里还装着先验预测器留下的巨大残差，这些冷启动日的费用与 K 的关系和常态日
-    相反，会主导整月总费用并把 K_P 顶到网格边界。默认 (4, 5) 为回退值。
+    每个候选都从 1 月 1 日、SOC=6000 起跑完全相同的校准流程，只是 `score_from`
+    之前的日子不计入得分。1 月 1 日没有历史预测，且不进入残差库；默认 (4, 5)
+    为回退值。
     """
     bundle = bundle or load_bundle()
     base = base or Params()
@@ -218,9 +227,14 @@ def select_kp(
     candidates: list[KpCandidate] = []
     for kp in k_grid:
         t0 = time.perf_counter()
-        source = PriceForecaster(dates, prices, bundle.att1, k=kp)
+        source = PriceForecaster(
+            dates, prices, bundle.att1, k=kp, branch="q4_2", mode="legacy_level"
+        )
+        # Price-window selection changes only the legacy price increment.
+        # Keep load/PV baseline identity and all other caller options intact.
+        calibration = replace(base, calibration=True)
         res = run_period(
-            WARMUP_START, end, base, bundle, soc_init=SOC_INIT, price_source=source
+            WARMUP_START, end, calibration, bundle, soc_init=SOC_INIT, price_source=source
         )
         plan_cost, emergency_cost, emergency_kwh = _score(res, score_from)
         cand = KpCandidate(
@@ -282,7 +296,7 @@ def sensitivity(
     configs = [("M", m, params.horizon_days) for m in m_grid]
     configs += [("时域", params.m_scen, h) for h in horizon_grid]
     for tag, m, h in configs:
-        cfg = replace(params, m_scen=m, horizon_days=h)
+        cfg = replace(params, m_scen=m, horizon_days=h, calibration=False)
         res = run_period(start, end, cfg, bundle, record_from=record_from, soc_init=SOC_INIT)
         row = SensitivityRow(
             name=f"{tag}: M={m}, 时域={24 * h}h",

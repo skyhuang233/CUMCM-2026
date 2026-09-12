@@ -1,12 +1,11 @@
 """问 4：附件 4 波动电价下重跑问 2 与问 3（result4-2、result4-3）。
 
-与问 2 / 问 3 的唯一差别是电价：决策时刻只能看到已发生的电价，用
-`forecast_price.PriceForecaster`（近期同类型日基准 × 日水平因子 $\\lambda$）给出当天
-剩余段与次日的点预测，电价残差与负载、光伏残差取同一历史日形成联合场景；
-储能滚动 LP 每段用「当段真值 + 剩余段点预测」的电价；结算全部用附件 4 真值。
+在问2/问3的交易权限与预测边界上接入附件4电价：只使用已发生段，基线采用
+日水平×日内形状预测（4-2为净负荷回归，4-3为AR(1)），并将完整发布路径的价格、
+负载和光伏残差配对；结算全部使用附件4真值。
 
-`--perfect-price` 变体让 0:00 的 SAA 与重优化直接看到当天与次日的真实电价（无电价残差
-场景），其余完全相同，给出电价不确定性代价的下界。
+`--perfect-price` 变体让同一近似算法使用价格信息参照；它不是全量未来
+净负荷与价格已知的离线下界。
 """
 
 from __future__ import annotations
@@ -56,13 +55,24 @@ class Q4Run:
 
 
 def make_price_source(
-    att4: tuple[list[date], np.ndarray], att1, k_price: int, perfect: bool
+    att4: tuple[list[date], np.ndarray], att1, k_price: int, perfect: bool, *,
+    branch: str = "q4_2", bundle=None, mode: str = "baseline",
+    reference_baseline: bool = True,
 ) -> PriceSource:
-    """构造电价来源：默认为 walk-forward 预测器，`perfect=True` 时为完美电价信息。"""
+    """Construct the branch-specific causal price source.
+
+    Q4-2's historical regression feature is rebuilt at each historical
+    publication time: observed prefix plus the prediction available then.
+    """
     dates, prices = att4
     if perfect:
         return PerfectPriceSource(dates, prices)
-    return PriceForecaster(dates, prices, att1, k=k_price)
+    # Q2 binds the net-load callback after constructing its selected load/PV
+    # forecaster.  Binding here would silently use PointForecaster defaults
+    # rather than the caller's k_load/k_pv/legacy configuration.
+    net_load = None
+    return PriceForecaster(dates, prices, att1, k=k_price, branch=branch,
+                           net_load=net_load, mode=mode)
 
 
 def run_q4_2(
@@ -127,9 +137,9 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         description="问 4：附件 4 波动电价下的电价预测层 + 问 2 / 问 3 重算"
     )
     parser.add_argument("--which", choices=("2", "3", "both"), default="both")
-    parser.add_argument(
-        "--skip-tuning", action="store_true", help=f"跳过 1 月 K_p 选择，直接用 K_p={K_PRICE}"
-    )
+    parser.add_argument("--tune", action="store_true", help="显式运行独立一月的 K_p 增量校准")
+    parser.add_argument("--legacy-price", action="store_true",
+                        help="使用旧日水平电价预测增量（--tune 也会启用）")
     parser.add_argument("--k-price", type=int, default=None)
     parser.add_argument("--k-load", type=int, default=K_LOAD)
     parser.add_argument("--k-pv", type=int, default=K_PV)
@@ -137,8 +147,12 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
     parser.add_argument("--step-minutes", type=int, default=10)
     parser.add_argument("--candidate-workers", type=int, default=1,
                         help="每条回测中并行重评候选的进程数；与并行全年任务共享总核数")
+    parser.add_argument("--candidate-reeval", action="store_true")
+    parser.add_argument("--horizon-days", choices=(1, 2), type=int, default=1)
+    parser.add_argument("--legacy-means", action="store_true")
+    parser.add_argument("--same-type-scenarios", action="store_true")
     parser.add_argument(
-        "--perfect-price", action="store_true", help="完美电价信息变体（费用下界）"
+        "--perfect-price", action="store_true", help="完美价格信息参照（非离线下界）"
     )
     parser.add_argument(
         "--with-constant",
@@ -160,7 +174,8 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
     do2, do3 = want
 
     k_price = K_PRICE if args.k_price is None else args.k_price
-    if args.k_price is None and not args.skip_tuning and not args.perfect_price:
+    price_mode = "legacy_level" if (args.legacy_price or args.tune) else "baseline"
+    if args.k_price is None and args.tune and not args.perfect_price:
         from .tuning import select_kp
 
         print("在 1 月（1–7 日预热不计分）按问 4-2 管线选择 K_p …", flush=True)
@@ -173,6 +188,11 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
                 candidate_workers=args.candidate_workers,
+                candidate_reeval=args.candidate_reeval,
+                horizon_days=args.horizon_days,
+                reference_baseline=not args.legacy_means,
+                scenario_same_type=args.same_type_scenarios,
+                calibration=False,
             ),
         )
         k_price = picked.k_price
@@ -181,17 +201,19 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         why = (
             "命令行指定"
             if args.k_price is not None
-            else ("完美电价变体不需要基准" if args.perfect_price else "默认（--skip-tuning）")
+            else ("完美电价变体不需要基准" if args.perfect_price else "论文基线默认")
         )
         print(f"使用参数 K_p={k_price}（{why}）\n")
-    print(f"K_L={args.k_load}, K_P={args.k_pv}（问 2 在 1 月选定），M={args.m_scen}")
+    print(f"K_L={args.k_load}, K_P={args.k_pv}，M={args.m_scen}，电价模式={price_mode}")
     if args.perfect_price:
         print("电价来源：完美信息（0:00 已知当天与次日真实电价，无电价残差场景）")
     print()
 
     out: dict[str, object] = {"k_price": k_price}
     if do2:
-        source = make_price_source(att4, bundle2.att1, k_price, args.perfect_price)
+        source = make_price_source(att4, bundle2.att1, k_price, args.perfect_price,
+                                   branch="q4_2", bundle=bundle2, mode=price_mode,
+                                   reference_baseline=not args.legacy_means)
         print(
             f"问 4-2 回测 {WARMUP_START.isoformat()} → {args.end.isoformat()}"
             f"（{args.start.isoformat()} 起计入结果）",
@@ -207,6 +229,11 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
                 candidate_workers=args.candidate_workers,
+                candidate_reeval=args.candidate_reeval,
+                horizon_days=args.horizon_days,
+                reference_baseline=not args.legacy_means,
+                scenario_same_type=args.same_type_scenarios,
+                calibration=False,
             ),
             start=args.start,
             end=args.end,
@@ -229,7 +256,9 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
 
     if do3:
         bundle3 = load_bundle_q3()
-        source3 = make_price_source(att4, bundle3.att1, k_price, args.perfect_price)
+        source3 = make_price_source(att4, bundle3.att1, k_price, args.perfect_price,
+                                    branch="q4_3", bundle=bundle3, mode=price_mode,
+                                    reference_baseline=not args.legacy_means)
         print(
             f"问 4-3 回测 {WARMUP_START.isoformat()} → {args.end.isoformat()}"
             f"（{args.start.isoformat()} 起计入结果）",
@@ -245,6 +274,11 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                 m_scen=args.m_scen,
                 step_minutes=args.step_minutes,
                 candidate_workers=args.candidate_workers,
+                candidate_reeval=args.candidate_reeval,
+                horizon_days=args.horizon_days,
+                reference_baseline=not args.legacy_means,
+                scenario_same_type=args.same_type_scenarios,
+                calibration=False,
             ),
             start=args.start,
             end=args.end,
@@ -287,6 +321,11 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                     k_load=args.k_load, k_pv=args.k_pv,
                     m_scen=args.m_scen, step_minutes=args.step_minutes,
                     candidate_workers=args.candidate_workers,
+                    candidate_reeval=args.candidate_reeval,
+                    horizon_days=args.horizon_days,
+                    reference_baseline=not args.legacy_means,
+                    scenario_same_type=args.same_type_scenarios,
+                    calibration=False,
                 ), bundle2, record_from=args.start, soc_init=SOC_INIT,
                 progress=args.progress,
             )
@@ -304,6 +343,11 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                     k_load=args.k_load, k_pv=args.k_pv,
                     m_scen=args.m_scen, step_minutes=args.step_minutes,
                     candidate_workers=args.candidate_workers,
+                    candidate_reeval=args.candidate_reeval,
+                    horizon_days=args.horizon_days,
+                    reference_baseline=not args.legacy_means,
+                    scenario_same_type=args.same_type_scenarios,
+                    calibration=False,
                 ), bundle3, record_from=args.start, soc_init=SOC_INIT,
                 progress=args.progress,
             )

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from src.data import ETA, P_MAX_KWH, SOC_INIT, SOC_MAX, SOC_MIN, T, load_attachment1
-from src.optimizer import solve_deterministic
+from src.optimizer import eliminate_simultaneous_charge_discharge, solve_deterministic
 from src.results import interval_sums, summarize_q1
 
 
@@ -70,3 +70,13 @@ def test_assembler_is_parameterized_in_T():
     assert res.G.shape == (n,)
     assert abs(res.S[-1] - SOC_INIT) < 1e-6
     assert n != T
+
+
+def test_zero_price_degeneracy_is_recovered_without_changing_soc_or_balance():
+    c, d, w = eliminate_simultaneous_charge_discharge(
+        np.array([10.0]), np.array([8.1]), np.array([0.0])
+    )
+    assert min(c[0], d[0]) < 1e-10
+    assert abs(ETA * c[0] - d[0] / ETA) < 1e-10
+    # C and D changes preserve energy balance after the efficiency loss is W.
+    assert abs((d[0] - c[0] - w[0]) - (8.1 - 10.0)) < 1e-10

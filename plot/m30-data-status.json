@@ -1,0 +1,16 @@
+{
+  "missing": [
+    "q3_48h",
+    "q3_candidates",
+    "q3_legacy_means",
+    "q3_same_type",
+    "q4_2_candidates",
+    "q4_2_legacy_means",
+    "q4_2_legacy_price",
+    "q4_2_same_type",
+    "q4_3_48h",
+    "q4_3_legacy_means",
+    "q4_3_legacy_price",
+    "q4_3_same_type"
+  ]
+}

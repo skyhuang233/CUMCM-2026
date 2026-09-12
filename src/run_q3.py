@@ -1,17 +1,21 @@
 """问 3：附件 3 预报插值、固定时点滚动重优化与调整购电结算。
 
 每个决策日：
-  1. 0:00 用附件 3 的 0:00 预报（线性插值到 10 分钟）作当天光伏点预测，负载沿用问 2 的
-     $K_L$ 同类型日均值；场景取 0:00 残差库，SAA 两阶段 LP 冻结计划购电量 $G^0$；
+  1. 0:00 用附件 3 的正式预报与三日历史光伏均值组合，负载采用分解式预测；完整交付后
+     才可选用的同发布时刻配对路径构成场景，SAA 两阶段 LP 冻结计划购电量 $G^0$；
   2. 在 6:00 / 12:00 / 18:00 用新预报与当前执行 SOC 求解重优化 LP，决定调整购电量
      $G^a = G^0 + \\Delta^+ - \\Delta^-$，**只提交到下一个预报时刻**；
-  3. 储能仍由问 2 的滚动 LP 逐段控制，其固定购电量数组 = 已提交段的 $G^a$ + 未提交段的 $G^0$；
+  3. 储能由精确凸分段线性 DP 的未来费用函数逐段因果执行；固定购电量为已提交段的
+     $G^a$ 与未提交段的 $G^0$ 共同组成的数组；
   4. 按 $p\\min(G^0,G^a) + 0.5p(G^0-G^a)^+ + 1.5p(G^a-G^0)^+ + 5pE$ 结算。
 
 `--issues` 可选预报时刻子集：集合 $S$ 中的时刻 $h_0$ 提交到 $S$ 中下一个时刻（或 24:00），
 不在 $S$ 中的时刻既不重优化也不刷新点预测曲线，用于回答「是否需要引入其他时刻预报」。
 
-1 月为冷启动预热（同样的完整流程，只是不写入结果文件），2–12 月为正式结果。
+常规运行中 1 月只生成当时发布的预测与完整路径残差，SOC 保持待机的 6000 kWh；
+2–12 月连续执行。只有显式校准运行才在一月执行，且其状态不传入正式回测。
+参考基线在每个发布时刻使用完整 24h 前瞻与线性续存费用；48h + 次日点预测
+价值函数为显式增量（`horizon_days=2`）。
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from __future__ import annotations
 import argparse
 import time
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time as clock_time, timedelta
+from pathlib import Path
 
 import numpy as np
 
@@ -35,16 +40,17 @@ from .data import (
     load_attachment2,
     load_attachment3,
 )
+from .checkpoint import identity as checkpoint_identity, load as load_checkpoint, save as save_checkpoint
 from .executor import DayExecution, run_day_dp, DPValueExecutor
-from .value_dp import next_day_value
+from .value_dp import ConvexPiecewiseLinear, future_cost, next_day_value
 from .parallel_eval import CandidateEvaluator
 from .forecast import PointForecaster
-from .forecast_price import ConstantPriceSource, PriceSource, horizon_price
+from .forecast_price import ConstantPriceSource, PriceSource
 from .forecast_pv import ISSUE_HOURS, PVIssueForecaster, issue_segment
 from .optimizer import solve_readjust, solve_saa, solve_saa_point
 from .results import print_day_summary_q3, summarize_day_q3, variant_table, write_result3
 from .run_q2 import PERIOD_END, RECORD_START, WARMUP_START, daterange
-from .scenarios import M_SCEN, PVResidualLibraryByIssue, ResidualLibrary
+from .scenarios import IssuedPathLibrary, M_SCEN
 from .settlement import cost_q3
 
 REPORT_DAYS = [date(2025, 3, 20), date(2025, 6, 21), date(2025, 9, 23), date(2025, 12, 21)]
@@ -66,6 +72,11 @@ class Params:
     step_minutes: int = 10
     issues: tuple[int, ...] = ISSUE_HOURS
     candidate_workers: int = 1  # independent plan candidates; 1 keeps serial execution
+    candidate_reeval: bool = False  # 凸组合重评为显式增量，不是论文基线
+    horizon_days: int = 1
+    reference_baseline: bool = True
+    scenario_same_type: bool = False
+    calibration: bool = False
 
 
 @dataclass
@@ -237,204 +248,247 @@ def run_period(
     soc_init: float = SOC_INIT,
     progress: int = 0,
     price_source: PriceSource | None = None,
+    checkpoint_path: str | None = None,
+    resume: bool = False,
+    checkpoint_tag: str | None = None,
 ) -> PeriodResult:
-    """从 start 到 end 逐日 walk-forward 回测；只记录 record_from 起的日子。
+    """Publication-time walk-forward orchestration with complete residual paths.
 
-    `price_source` 缺省为附件 1 的常数电价（问 3 本体）；问 4 传入附件 4 的电价预测器，
-    此时每个预报时刻同时刷新光伏预报与电价的日水平因子 $\\lambda$。
+    The baseline uses a 24h linear continuation.  The explicit 48h increment
+    uses current-path uncertainty plus a point-predicted, free-purchase next
+    day value.  January is standby unless ``calibration`` is enabled.
     """
     record_from = start if record_from is None else record_from
     issues = tuple(sorted(set(int(h) for h in params.issues)))
-    assert issues and issues[0] == 0, "预报时刻集合必须包含 0:00（计划购电由它决定）"
-    assert all(h in ISSUE_HOURS for h in issues), f"预报时刻只能取自 {ISSUE_HOURS}"
+    assert issues and issues[0] == 0
     blocks = block_bounds_of(issues)
-
     ps: PriceSource = price_source or ConstantPriceSource(bundle.att1.price)
-    price48_0 = horizon_price(ps, start, 0, 2)
+    if params.horizon_days not in (1, 2):
+        raise ValueError("horizon_days must be 1 (24h) or 2 (48h + V)")
     forecaster = PointForecaster(
-        bundle.daily, bundle.att1, k_load=params.k_load, k_pv=params.k_pv
+        bundle.daily, bundle.att1, k_load=params.k_load, k_pv=params.k_pv,
+        reference_baseline=params.reference_baseline,
     )
     pv_fc = PVIssueForecaster(bundle.daily, bundle.att3)
-    library = ResidualLibrary()
-    pv_lib = PVResidualLibraryByIssue(library)
+    paths = IssuedPathLibrary(same_type=params.scenario_same_type)
+    pending: list[tuple[date, int, np.ndarray, np.ndarray, np.ndarray | None]] = []
 
-    def learn(d: date) -> None:
-        """把日期 d 的残差入库：负载沿用问 2 的库，光伏与电价按发布时刻分库。"""
-        load_pred, pv_pred = forecaster.predict(d)
-        load_true, pv_true = bundle.truth(d)
-        library.update(d, load_true, pv_true, load_pred, pv_pred, ps.residual(d, 0))
-        for h0 in issues:
-            pv_lib.update(
-                d, h0, pv_fc.residual(d, h0), ps.residual(d, issue_segment(h0))
-            )
+    def release(asof: date, hour: int) -> None:
+        now = datetime.combine(asof, clock_time(hour))
+        keep = []
+        for issued, issued_hour, lp, vp, pp in pending:
+            delivered = datetime.combine(issued, clock_time(issued_hour)) + timedelta(hours=24)
+            if delivered <= now:
+                if issued != WARMUP_START:
+                    t = issue_segment(issued_hour)
+                    l0, v0 = bundle.truth(issued)
+                    l1, v1 = bundle.truth(issued + timedelta(days=1))
+                    actual_l = np.concatenate([l0[t:], l1[:t]])
+                    actual_v = np.concatenate([v0[t:], v1[:t]])
+                    actual_p = None
+                    if pp is not None:
+                        p0, p1 = ps.truth(issued), ps.truth(issued + timedelta(days=1))
+                        actual_p = np.concatenate([p0[t:], p1[:t]])
+                    paths.update(issued, issued_hour, actual_l - lp, actual_v - vp,
+                                 None if actual_p is None else actual_p - pp)
+            else:
+                keep.append((issued, issued_hour, lp, vp, pp))
+        pending[:] = keep
 
-    # 起始日之前的历史也要入库，否则场景层要等到区间中段才有残差可用。
-    for d in daterange(bundle.daily.dates[0], start - timedelta(days=1)):
-        learn(d)
-
-    out = PeriodResult(soc_end=float(soc_init), label=",".join(str(h) for h in issues))
+    checkpoint_file = None if checkpoint_path is None else Path(checkpoint_path)
+    run_identity = checkpoint_identity(
+        "q3", start, end, record_from, params, varies_price=ps.varies,
+        tag=checkpoint_tag,
+    )
+    out = PeriodResult(soc_end=float(soc_init), label=','.join(map(str, issues)))
     soc = float(soc_init)
-    t_start = time.perf_counter()
-    candidate_evaluator = CandidateEvaluator(params.candidate_workers)
-    for i, d in enumerate(daterange(start, end)):
-        load_pred, _ = forecaster.predict(d)
-        load_next, pv_mean_next = forecaster.predict_next(d)
-        load_true, pv_true = bundle.truth(d)
-        price = ps.truth(d)
-        price48 = price48_0 if not ps.varies else horizon_price(ps, d, 0, 2)
-        # Execution needs only the realised scalar price, not a newly-built
-        # 48-hour forecast vector every ten minutes.
-        price_fn = (lambda t, p=price: float(p[t])) if ps.varies else None
-        value_cache: dict[tuple[bytes, bytes, bytes], object] = {}
-
-        def next_value(price_next: np.ndarray, load_next: np.ndarray, pv_next: np.ndarray):
-            p, l, v = (np.ascontiguousarray(x, dtype=float) for x in (price_next, load_next, pv_next))
-            key = (p.tobytes(), l.tobytes(), v.tobytes())
-            if key not in value_cache:
-                value_cache[key] = next_day_value(p, l, v)
-            return value_cache[key]
-
-        # 0:00：附件 3 的 0:00 预报 + 0:00 残差库 → SAA 冻结计划购电量
-        pv_today, pv_next = pv_fc.curves(d, 0, pv_mean_next)
-        L_scen, PV_scen = pv_lib.scenarios(d, 0, load_pred, pv_today, params.m_scen)
-        price_scen = pv_lib.price_scenarios(
-            d, 0, price48[:T], price48[T:], params.m_scen
-        )
-        saa = solve_saa(
-            price48,
-            L_scen,
-            PV_scen,
-            load_next,
-            pv_next,
-            soc,
-            n_today=T,
-            price_scen=price_scen,
-        )
-        # 0:00 与后续重优化块同样从场景解、点预测解的五个凸组合中
-        # 选取 DP 回放费用最低的计划，之后才冻结为 G^0。
-        point0 = solve_saa_point(
-            price48, load_pred, pv_today, load_next, pv_next, soc, n_today=T
-        )
-        g_s0 = np.maximum(saa.G0, 0.0)
-        g_d0 = np.maximum(point0.G[:T], 0.0)
-        terminal0 = next_value(np.asarray(price48[T:], float), load_next, pv_next)
-        p0_scen = None if price_scen is None else np.asarray(price_scen[:, :T], float)
-        candidates0 = [(1.0 - a) * g_s0 + a * g_d0 for a in (0.0, 0.25, 0.5, 0.75, 1.0)]
-        scored0 = candidate_evaluator.evaluate(
-            candidates0, L_scen, PV_scen, price48[:T], soc, terminal0,
-            price_scen=p0_scen,
-        )
-        winner0 = int(np.argmin([score for score, _ in scored0]))
-        G0, hbar0 = candidates0[winner0], scored0[winner0][1]
-        Ga = G0.copy()  # 每段唯一的提交值；0:00–6:00 段恒等于 G^0
-        g_cur = G0.copy()  # 滚动 LP 用：已提交段取 G^a，未提交段取 G^0
-
-        execution = DayExecution.empty(d, soc)
+    last_completed: date | None = None
+    prior_elapsed = 0.0
+    if resume:
+        if checkpoint_file is None:
+            raise ValueError("resume requires checkpoint_path")
+        state = load_checkpoint(checkpoint_file, run_identity)
+        out = state["result"]
+        soc = float(state["soc"])
+        paths = state["paths"]
+        pending = state["pending"]
+        last_completed = state["last_day"]
+        prior_elapsed = float(state.get("elapsed_s", 0.0))
+    wall = time.perf_counter()
+    evaluator = CandidateEvaluator(params.candidate_workers) if params.candidate_reeval else None
+    run_start = min(start, WARMUP_START)
+    for day_no, d in enumerate(daterange(run_start, end)):
+        if last_completed is not None and d <= last_completed:
+            continue
+        executing = d >= RECORD_START or params.calibration
+        execution = DayExecution.empty(d, soc) if executing else None
+        G0 = Ga = None
         soc_block = soc
-        for h0, t0, t1 in blocks:
-            price_s = price_scen
-            if h0:
-                pv_today, pv_next = pv_fc.curves(d, h0, pv_mean_next)
-                L_s, PV_s = pv_lib.scenarios(
-                    d, h0, load_pred[t0:], pv_today[t0:], params.m_scen
+        for h, t0, t1 in blocks:
+            release(d, h)
+            load_today, pv3_today = forecaster.predict(d)
+            load_next, pv3_next = forecaster.predict_next(d)
+            pv_today, pv_next = pv_fc.combined_curves(d, h, pv3_today)
+            pv_path = pv_fc.path(d, h, pv3_today)
+            load_path = np.concatenate([load_today[t0:], load_next[:t0]])
+            try:
+                price_today, price_next = ps.predict(
+                    d, t0,
+                    net_load_pred=float((load_path - pv_path).sum()),
+                    net_load_next=float((load_next - pv3_next).sum()),
                 )
-                # 重优化同时刷新光伏预报与电价的日水平因子（当天已观测段的最小二乘）
-                price48_h = price48 if not ps.varies else horizon_price(ps, d, t0, 2)
-                price_s = pv_lib.price_scenarios(
-                    d, h0, price48_h[t0:T], price48_h[T:], params.m_scen
-                )
-                if price_s is not None:  # 场景电价按 price48 的整日约定补齐 $t<t_0$ 段
-                    head = np.tile(price48_h[:t0], (price_s.shape[0], 1))
-                    price_s = np.concatenate([head, price_s], axis=1)
-                rj = solve_readjust(
-                    t0,
-                    price48_h,
-                    G0,
-                    L_s,
-                    PV_s,
-                    load_next,
-                    pv_next,
-                    soc_block,
-                    price_scen=price_s,
-                )
-                rj_point = solve_readjust(
-                    t0,
-                    price48_h,
-                    G0,
-                    load_pred[t0:][None, :],
-                    pv_today[t0:][None, :],
-                    load_next,
-                    pv_next,
-                    soc_block,
-                )
-                vnext = next_value(np.asarray(price48_h[T:], float), load_next, pv_next)
-                p_eval = np.asarray(price48_h[t0:T], float)
-                ps_eval = None if price_s is None else np.asarray(price_s[:, t0:T], float)
-                cand = [
-                    (1.0 - a) * rj.Ga[t0:] + a * rj_point.Ga[t0:]
-                    for a in (0.0, 0.25, 0.5, 0.75, 1.0)
-                ]
-                scored = candidate_evaluator.evaluate(
-                    cand, L_s, PV_s, p_eval, soc_block, vnext,
-                    price_scen=ps_eval, base_plan=G0[t0:],
-                )
-                wi = int(np.argmin([score for score, _ in scored]))
-                chosen_ga, hbar_chosen = cand[wi], scored[wi][1]
-                Ga[t0:t1] = chosen_ga[: t1 - t0]  # 只提交到下一预报时刻，其余为临时决策
-                g_cur[t0:t1] = Ga[t0:t1]
-            # 每次重优化后从当前时刻重算未来费用函数，并用 DP 价值执行器逐段执行。
-            hbar = hbar0 if h0 == 0 else hbar_chosen
-            price_rem = np.asarray(price48_h if h0 else price48, float)[t0:T]
-            dp_executor = DPValueExecutor(hbar, price=price_rem).prepare(t0)
-            run_day_dp(
-                d,
-                g_cur,
-                soc_block,
-                load_true,
-                pv_true,
-                price,
-                dp_executor,
-                t_start=t0,
-                t_end=t1,
-                out=execution,
-                price_fn=price_fn,
-            )
-            soc_block = float(execution.S[t1 - 1])
+            except TypeError:
+                # Compatibility with instrumentation wrappers that expose the
+                # original positional interface only.
+                price_today, price_next = ps.predict(d, t0)
+            price_today = np.asarray(price_today, float)
+            price_next = np.asarray(price_next, float)
+            price_path = np.concatenate([price_today[t0:], price_next[:t0]])
+            pending.append((d, h, load_path.copy(), pv_path.copy(),
+                            price_path.copy() if ps.varies else None))
+            if not executing:
+                continue
 
-        cost = cost_q3(price, G0, Ga, execution.E)
+            L, PV, P = paths.scenarios(
+                datetime.combine(d, clock_time(h)), h,
+                load_path, pv_path, price_path if ps.varies else None,
+                params.m_scen,
+            )
+            q = T - t0
+            use_48h = params.horizon_days == 2
+            terminal_rate = 0.481548
+            if ps.varies:
+                price_for_v = price_path[None, :] if P is None else P
+                q_v = T - t0
+                terminal_rate = float(np.mean([row[:30].mean() / .9 if t0 == 0
+                                               else row[q_v:q_v + 30].mean() / .9
+                                               for row in price_for_v]))
+            terminal = ConvexPiecewiseLinear.constant(0).add_linear(-terminal_rate)
+            price48 = np.concatenate([price_today, price_next[:t0]])
+            # The 48h increment keeps uncertainty only in the current
+            # remaining q segments.  Tomorrow is a common point forecast
+            # with free purchase; its exact continuous DP V is the terminal
+            # value used by the causal executor and candidate score.
+            if use_48h:
+                terminal = next_day_value(price_next, load_next, pv_next)
+                price48 = np.concatenate([price_today, price_next])
+            p48_scen = None
+            if P is not None:
+                p48_scen = np.concatenate([np.tile(price_today[:t0], (P.shape[0], 1)), P], axis=1)
+            if use_48h and P is not None:
+                p48_scen = np.concatenate([
+                    np.tile(price_today[:t0], (P.shape[0], 1)),
+                    P[:, :q],
+                    np.tile(price_next, (P.shape[0], 1)),
+                ], axis=1)
+            if h == 0:
+                future_l = np.tile(load_next[None, :], (L.shape[0], 1)) if use_48h else L[:, q:]
+                future_pv = np.tile(pv_next[None, :], (PV.shape[0], 1)) if use_48h else PV[:, q:]
+                saa = solve_saa(price48, L[:, :q], PV[:, :q], future_l, future_pv, soc_block,
+                                n_today=q, price_scen=p48_scen,
+                                terminal_value=0.0 if use_48h else terminal_rate)
+                g_s = np.maximum(saa.G0, 0)
+                if evaluator is not None:
+                    point = solve_saa_point(
+                        price48, load_path[:q], pv_path[:q],
+                        load_next if use_48h else load_path[q:],
+                        pv_next if use_48h else pv_path[q:], soc_block,
+                        n_today=q, terminal_value=0.0 if use_48h else terminal_rate,
+                    )
+                    g_d = np.maximum(point.G[:q], 0)
+                    candidates = [(1-a)*g_s+a*g_d for a in (0., .25, .5, .75, 1.)]
+                    scored = evaluator.evaluate(candidates, L[:, :q] if use_48h else L,
+                                                 PV[:, :q] if use_48h else PV,
+                                                 price_path[:q] if use_48h else price_path,
+                                                 soc_block, terminal,
+                                                 price_scen=P[:, :q] if use_48h and P is not None else P, n_fixed=q)
+                    chosen = candidates[int(np.argmin([x[0] for x in scored]))]
+                    hbar = scored[int(np.argmin([x[0] for x in scored]))][1]
+                else:
+                    chosen = g_s
+                    hbar = future_cost(
+                        P[:, :q] if use_48h and P is not None else (P if P is not None else price_path[:q] if use_48h else price_path),
+                        L[:, :q] if use_48h else L,
+                        PV[:, :q] if use_48h else PV,
+                        chosen, terminal, n_fixed=q,
+                    )
+                G0 = chosen.copy()
+                Ga = G0.copy()
+                g_execute = G0
+            else:
+                assert G0 is not None and Ga is not None
+                future_l = np.tile(load_next[None, :], (L.shape[0], 1)) if use_48h else L[:, q:]
+                future_pv = np.tile(pv_next[None, :], (PV.shape[0], 1)) if use_48h else PV[:, q:]
+                rj = solve_readjust(t0, price48, G0, L[:, :q], PV[:, :q], future_l, future_pv,
+                                    soc_block, price_scen=p48_scen,
+                                    terminal_value=0.0 if use_48h else terminal_rate)
+                g_s = np.maximum(rj.Ga[t0:], 0)
+                if evaluator is not None:
+                    rj_point = solve_readjust(
+                        t0, price48, G0, load_path[:q][None, :], pv_path[:q][None, :],
+                        load_next[None, :] if use_48h else load_path[q:][None, :],
+                        pv_next[None, :] if use_48h else pv_path[q:][None, :], soc_block,
+                        terminal_value=0.0 if use_48h else terminal_rate,
+                    )
+                    g_d = np.maximum(rj_point.Ga[t0:], 0)
+                    candidates = [(1-a)*g_s+a*g_d for a in (0., .25, .5, .75, 1.)]
+                    scored = evaluator.evaluate(candidates, L[:, :q] if use_48h else L,
+                                                 PV[:, :q] if use_48h else PV,
+                                                 price_path[:q] if use_48h else price_path,
+                                                 soc_block, terminal,
+                                                 price_scen=P[:, :q] if use_48h and P is not None else P,
+                                                 base_plan=G0[t0:], n_fixed=q)
+                    winner = int(np.argmin([x[0] for x in scored]))
+                    chosen, hbar = candidates[winner], scored[winner][1]
+                else:
+                    chosen = g_s
+                    hbar = future_cost(
+                        P[:, :q] if use_48h and P is not None else (P if P is not None else price_path[:q] if use_48h else price_path),
+                        L[:, :q] if use_48h else L,
+                        PV[:, :q] if use_48h else PV,
+                        chosen, terminal, n_fixed=q,
+                    )
+                # Only this block is committed.  The later part remains a temporary decision.
+                Ga[t0:t1] = chosen[:t1-t0]
+                g_execute = Ga
+            dp = DPValueExecutor(hbar, price=price_today[t0:]).prepare(t0)
+            load_true, pv_true = bundle.truth(d)
+            run_day_dp(d, g_execute, soc_block, load_true, pv_true, ps.truth(d), dp,
+                       t_start=t0, t_end=t1, out=execution,
+                       price_fn=(lambda j, p=ps.truth(d): float(p[j])) if ps.varies else None)
+            soc_block = float(execution.S[t1-1])
+
+        if not executing:
+            if checkpoint_file is not None:
+                save_checkpoint(
+                    checkpoint_file, run_identity=run_identity, last_day=d,
+                    soc=soc, result=out, pending=pending, paths=paths,
+                    elapsed_s=prior_elapsed + time.perf_counter() - wall,
+                )
+            if progress and (day_no + 1) % progress == 0:
+                print(f'  [{d.isoformat()}] 已完成 {day_no + 1} 天，'
+                      f'累计运行 {prior_elapsed + time.perf_counter() - wall:.1f}s，', flush=True)
+            continue
+        assert execution is not None and G0 is not None and Ga is not None
+        price_true = ps.truth(d)
+        cost = cost_q3(price_true, G0, Ga, execution.E)
         if d >= record_from:
-            out.days.append(
-                DayResult(
-                    day=d,
-                    G0=G0,
-                    Ga=Ga,
-                    C=execution.C,
-                    D=execution.D,
-                    S=execution.S,
-                    E=execution.E,
-                    W=execution.W,
-                    R=execution.R,
-                    soc_start=execution.soc_start,
-                    plan_cost=cost["plan"],
-                    curtail_cost=cost["curtail_penalty"],
-                    extra_cost=cost["extra"],
-                    emergency_cost=cost["emergency"],
-                    plan_only_cost=float(price @ G0),
-                    price=price if ps.varies else None,
-                )
-            )
-        learn(d)
+            out.days.append(DayResult(d, G0, Ga, execution.C, execution.D, execution.S, execution.E,
+                execution.W, execution.soc_start, cost['plan'], cost['curtail_penalty'], cost['extra'],
+                cost['emergency'], execution.R, float(price_true @ G0), price_true if ps.varies else None))
         soc = execution.soc_end
-        if progress and (i + 1) % progress == 0:
-            print(
-                f"  [{d.isoformat()}] 已完成 {i + 1} 天，"
-                f"用时 {time.perf_counter() - t_start:.1f}s",
-                flush=True,
+        if checkpoint_file is not None:
+            save_checkpoint(
+                checkpoint_file, run_identity=run_identity, last_day=d,
+                soc=soc, result=out, pending=pending, paths=paths,
+                elapsed_s=prior_elapsed + time.perf_counter() - wall,
             )
-
-    out.soc_end = soc
-    out.runtime_s = time.perf_counter() - t_start
-    candidate_evaluator.close()
+        if progress and (day_no + 1) % progress == 0:
+            print(f'  [{d.isoformat()}] 已完成 {day_no + 1} 天，'
+                  f'累计运行 {prior_elapsed + time.perf_counter() - wall:.1f}s，', flush=True)
+    if evaluator is not None:
+        evaluator.close()
+    out.soc_end, out.runtime_s = soc, prior_elapsed + time.perf_counter() - wall
     return out
 
 
@@ -501,11 +555,8 @@ def main(argv: list[str] | None = None) -> PeriodResult:
     parser = argparse.ArgumentParser(
         description="问 3：附件 3 预报 + 固定时点重优化 + 调整购电结算"
     )
-    parser.add_argument(
-        "--skip-tuning",
-        action="store_true",
-        help=f"跳过 1 月参数选择，直接用问 2 选定的 K_L={K_LOAD}, K_P={K_PV}",
-    )
+    parser.add_argument("--tune", action="store_true", help="显式运行独立的一月增量校准")
+    parser.add_argument("--skip-tuning", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--k-load", type=int, default=None)
     parser.add_argument("--k-pv", type=int, default=None)
     parser.add_argument("--m-scen", type=int, default=M_SCEN)
@@ -513,6 +564,10 @@ def main(argv: list[str] | None = None) -> PeriodResult:
                         help="仅 legacy 滚动 LP 实验使用；DP 主流程固定 10 分钟")
     parser.add_argument("--candidate-workers", type=int, default=1,
                         help="并行重评独立候选的进程数；单次回测最多有效使用 5 个")
+    parser.add_argument("--candidate-reeval", action="store_true")
+    parser.add_argument("--horizon-days", choices=(1, 2), type=int, default=1)
+    parser.add_argument("--legacy-means", action="store_true")
+    parser.add_argument("--same-type-scenarios", action="store_true")
     parser.add_argument("--issues", type=_parse_issues, default=ISSUE_HOURS,
                         help="可用预报时刻子集，如 0,6,12（必须含 0）")
     parser.add_argument("--variants", action="store_true",
@@ -531,26 +586,43 @@ def main(argv: list[str] | None = None) -> PeriodResult:
         step_minutes=args.step_minutes,
         issues=args.issues,
         candidate_workers=args.candidate_workers,
+        candidate_reeval=args.candidate_reeval,
+        horizon_days=args.horizon_days,
+        reference_baseline=not args.legacy_means,
+        scenario_same_type=args.same_type_scenarios,
+        calibration=False,
     )
 
     if args.k_load is not None:
         params.k_load = args.k_load
     if args.k_pv is not None:
         params.k_pv = args.k_pv
-    if not args.skip_tuning and args.k_load is None and args.k_pv is None:
+    if args.tune and args.k_load is None and args.k_pv is None:
         from .run_q2 import Params as Q2Params
         from .run_q2 import load_bundle as load_bundle_q2
         from .tuning import select_k
 
         print("在 1 月按问 2 流程（实际购电费）选择 K_L, K_P …", flush=True)
-        picked = select_k(load_bundle_q2(), base=Q2Params())
+        picked = select_k(
+            load_bundle_q2(),
+            base=Q2Params(
+                m_scen=params.m_scen,
+                candidate_workers=params.candidate_workers,
+                candidate_reeval=params.candidate_reeval,
+                horizon_days=params.horizon_days,
+                reference_baseline=False,
+                scenario_same_type=params.scenario_same_type,
+            ),
+        )
         params.k_load, params.k_pv = picked.k_load, picked.k_pv
+        params.reference_baseline = False
+        params.calibration = False
         print(
             f"选定 K_L={params.k_load}, K_P={params.k_pv}，"
             f"{picked.window} 总费用 {picked.cost:.2f} 元\n"
         )
     else:
-        source = "命令行指定" if (args.k_load or args.k_pv) else "问 2 选定值（--skip-tuning）"
+        source = "命令行指定" if (args.k_load or args.k_pv) else "论文基线默认"
         print(f"使用参数 K_L={params.k_load}, K_P={params.k_pv}（{source}）\n")
 
     variants = VARIANTS if args.variants else [tuple(params.issues)]
@@ -572,6 +644,11 @@ def main(argv: list[str] | None = None) -> PeriodResult:
                 step_minutes=params.step_minutes,
                 issues=issues,
                 candidate_workers=params.candidate_workers,
+                candidate_reeval=params.candidate_reeval,
+                horizon_days=params.horizon_days,
+                reference_baseline=params.reference_baseline,
+                scenario_same_type=params.scenario_same_type,
+                calibration=params.calibration,
             ),
             bundle,
             record_from=args.start,

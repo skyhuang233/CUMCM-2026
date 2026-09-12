@@ -150,3 +150,21 @@ def test_saa_horizon_can_be_24h(att):
     assert saa.G0.shape == (T,)
     assert saa.plan_cost > 0
     assert abs(saa.objective - saa.plan_cost) < 100 * EPS * L.sum()
+
+
+def test_terminal_linear_value_is_part_of_the_lp_objective():
+    out = solve_saa_point(
+        np.array([1.0]), np.array([0.0]), np.array([0.0]),
+        np.zeros(0), np.zeros(0), SOC_INIT, n_today=1, terminal_value=10.0,
+    )
+    assert out.S[-1] > SOC_INIT
+
+
+def test_saa_accepts_independent_next_day_scenarios():
+    # The next-day free purchases are recourse variables, so their loads/PV
+    # may differ by scenario rather than being silently collapsed to a mean.
+    out = solve_saa(
+        np.array([1.0, 1.0]), np.array([[0.0], [0.0]]), np.array([[0.0], [0.0]]),
+        np.array([[0.0], [3000.0]]), np.zeros((2, 1)), SOC_INIT, n_today=1,
+    )
+    assert out.G0.shape == (1,)

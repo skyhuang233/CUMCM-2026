@@ -120,3 +120,13 @@ def test_decision_at_h0_uses_only_data_available_at_h0(data):
         today_c, next_c = clean.curves(d, h, kp_mean)
         assert np.isfinite(today_g).all() and np.isfinite(next_g).all()
         assert np.allclose(today_g, today_c) and np.allclose(next_g, next_c)
+
+
+def test_zero_issue_combines_formal_and_three_day_history(pv_fc):
+    d = date(2025, 2, 1); hist = np.full(T, 17.)
+    today, _ = pv_fc.combined_curves(d, 0, hist)
+    assert np.allclose(today, .388815 * pv_fc.interpolate(d, 0) + .611185 * hist)
+
+
+def test_january_weight_has_no_sample_and_degenerate_fallback(pv_fc):
+    assert pv_fc.weight_at_zero(date(2025,1,2), np.zeros(T)) == 0.

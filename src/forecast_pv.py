@@ -24,6 +24,8 @@ HORIZON_HOURS = 24  # 附件 3 每次发布覆盖未来 24 个整点
 
 def issue_segment(issue_hour: int) -> int:
     """发布时刻 → 当天段下标 $t_0$（0:00→0, 6:00→36, 12:00→72, 18:00→108）。"""
+    if int(issue_hour) != issue_hour or int(issue_hour) not in ISSUE_HOURS:
+        raise ValueError(f"issue_hour must be one of {ISSUE_HOURS}")
     return int(issue_hour) * SEG_PER_HOUR
 
 
@@ -69,6 +71,49 @@ class PVIssueForecaster:
         """当天 $[6h_0, 144)$ 段的「真值 − 该时刻插值预报」，长度 $144-6h_0$。"""
         t0 = issue_segment(issue_hour)
         return self._pv[self._row[d], t0:] - self.interpolate(d, issue_hour)[: T - t0]
+
+    def weight_at_zero(self, d: date, historical: np.ndarray) -> float:
+        """Causal eq. (36) weight for a January 0:00 issue.
+
+        ``historical`` is the three-day forecast for d.  Only prior completed
+        paired forecasts are used; no pair means the specified w=0 fallback.
+        """
+        if d.month >= 2:
+            return 0.388815
+        ef, eh = [], []
+        for old in self.dates:
+            if old >= d or old.month != 1 or old == self.dates[0]:
+                continue
+            rows = [self._row[x] for x in self.dates if x < old][-3:]
+            if not rows or (old, 0) not in self.att3:
+                continue
+            h = self._pv[rows].mean(0)
+            f = self.interpolate(old, 0)
+            ef_i = self._pv[self._row[old]] - f
+            eh_i = self._pv[self._row[old]] - h
+            if np.isfinite(ef_i).all() and np.isfinite(eh_i).all():
+                ef.append(ef_i); eh.append(eh_i)
+        if not ef: return 0.0
+        ef, eh = np.concatenate(ef), np.concatenate(eh)
+        den = float(np.sum((ef-eh)**2))
+        return 0.0 if den <= 0 else float(np.clip(np.sum(eh*(eh-ef))/den, 0, 1))
+
+    def combined_curves(self, d: date, issue_hour: int, pv_mean_next: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Formal issue forecast, with the approved 0:00 formal/history mix."""
+        today, nxt = self.curves(d, issue_hour, pv_mean_next)
+        if int(issue_hour) != 0: return today, nxt
+        w = self.weight_at_zero(d, np.asarray(pv_mean_next, float))
+        formal = self.interpolate(d, 0)
+        # At 0:00 the historical three-day curve is the supplied mean, not
+        # ``today`` (which `curves` filled with the formal issue forecast).
+        hist = np.asarray(pv_mean_next, float)
+        return np.clip(w*formal+(1-w)*hist, 0, None), nxt
+
+    def path(self, d: date, issue_hour: int, pv_mean_next: np.ndarray) -> np.ndarray:
+        """The complete 24h path published at an issue (can cross midnight)."""
+        today, nxt = self.combined_curves(d, issue_hour, pv_mean_next)
+        t0 = issue_segment(issue_hour)
+        return np.concatenate([today[t0:], nxt[:t0]])
 
     def curves(
         self, d: date, issue_hour: int, pv_mean_next: np.ndarray

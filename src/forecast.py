@@ -1,77 +1,76 @@
-"""预测/场景层：walk-forward 点预测。
+"""Causal load-level/shape and three-day PV forecasts.
 
-决策日 d 的任何预测只允许使用日期严格早于 d 的附件 2 数据。这条信息假设由
-`PointForecaster._rows` 统一把关：所有对历史矩阵的读取都必须先经过它取行号，
-函数内部断言取到的行日期 < asof。
+``reference_baseline=True`` is the approved paper baseline.  The former
+day-type mean survives only as the explicit ``False`` incremental setting.
 """
-
 from __future__ import annotations
-
 from datetime import date, timedelta
-
 import numpy as np
-
 from .data import Attachment1, DailySeries, day_type
 
+LOW_START = date(2025, 1, 15)
+
+def load_kind(d: date) -> int:
+    """Paper k: Fri/Sat are low (0), all other days high (1)."""
+    return 0 if d.weekday() in (4, 5) else 1
 
 class PointForecaster:
-    """负载 / 光伏的逐段点预测器。
-
-    负载：日期 < asof 的最近 `k_load` 个同类型日的逐段均值。
-    光伏：日期 < asof 的最近 `k_pv` 天的逐段均值（不分日类型）。
-    冷启动：可用历史不足 k 时用全部可用；完全没有可用历史时退回附件 1 曲线。
-    """
-
-    def __init__(
-        self,
-        daily: DailySeries,
-        prior: Attachment1,
-        k_load: int = 4,
-        k_pv: int = 5,
-    ):
-        self.dates = list(daily.dates)
-        self._load = np.asarray(daily.load_kwh, dtype=float)
-        self._pv = np.asarray(daily.pv_kwh, dtype=float)
-        self._types = np.array([day_type(d) for d in self.dates], dtype=int)
-        self._ord = np.array([d.toordinal() for d in self.dates], dtype=int)
-        self.prior = prior
-        self.k_load = int(k_load)
-        self.k_pv = int(k_pv)
+    def __init__(self, daily: DailySeries, prior: Attachment1, k_load: int = 3,
+                 k_pv: int = 3, reference_baseline: bool = True):
+        self.dates = list(daily.dates); self._load = np.asarray(daily.load_kwh, float)
+        self._pv = np.asarray(daily.pv_kwh, float); self.prior = prior
+        self._ord = np.array([x.toordinal() for x in self.dates]); self._row = {x:i for i,x in enumerate(self.dates)}
+        self._types = np.array([day_type(x) for x in self.dates]); self.k_load, self.k_pv = int(k_load), int(k_pv)
+        self.reference_baseline = bool(reference_baseline)
 
     def _rows(self, asof: date, k: int, dtype: int | None = None) -> np.ndarray:
-        """最近 k 个可用历史日的行号；只含日期严格早于 asof 的行。"""
-        avail = self._ord < asof.toordinal()
-        if dtype is not None:
-            avail &= self._types == dtype
-        rows = np.flatnonzero(avail)[-k:]
-        assert rows.size == 0 or int(self._ord[rows].max()) < asof.toordinal(), (
-            "walk-forward 违例：取到了不早于决策日的历史行"
-        )
+        ok = self._ord < asof.toordinal()
+        if dtype is not None: ok &= self._types == dtype
+        rows = np.flatnonzero(ok)[-int(k):]
+        assert not rows.size or self._ord[rows].max() < asof.toordinal()
         return rows
 
+    def _warm_load(self, d: date, cutoff: date) -> np.ndarray:
+        hist = np.flatnonzero(self._ord < cutoff.toordinal())
+        if not hist.size:
+            return self.prior.load_kwh.copy()
+        rows = hist[np.array([self.dates[i].weekday() == d.weekday() for i in hist])][-3:]
+        if rows.size < 2: rows = hist[-7:]
+        return self._load[rows].mean(0) if rows.size else self.prior.load_kwh.copy()
+
+    def _paper_load(self, d: date, cutoff: date) -> np.ndarray:
+        if d < LOW_START: return np.asarray(self._warm_load(d, cutoff), float)
+        hist = np.flatnonzero(self._ord < cutoff.toordinal())
+        rows = hist[np.array([load_kind(self.dates[i]) == load_kind(d) for i in hist])][-3:]
+        if not rows.size: return np.asarray(self._warm_load(d, cutoff), float)
+        totals = self._load[rows].sum(1); shape = self._load[rows].sum(0) / max(float(totals.sum()), 1e-12)
+        beta = []
+        for i in hist:
+            if self._ord[i] < cutoff.toordinal() - 35: continue
+            prev = self._row.get(self.dates[i] - timedelta(days=1)); den = load_kind(self.dates[i]) - load_kind(self.dates[i] - timedelta(days=1))
+            if prev is not None and den and self._load[i].sum() > 0 and self._load[prev].sum() > 0:
+                beta.append(np.log(self._load[i].sum()/self._load[prev].sum()) / den)
+        previous_day = d - timedelta(days=1)
+        # For future requests d's level is itself a causal prediction.
+        if previous_day in self._row and previous_day < cutoff:
+            previous = float(self._load[self._row[previous_day]].sum())
+        else:
+            previous = float(self._paper_load(previous_day, cutoff).sum()) if previous_day >= LOW_START else float(self._warm_load(previous_day, cutoff).sum())
+        b = float(np.median(beta)) if beta else 0.0
+        return np.clip(previous*np.exp(b*(load_kind(d)-load_kind(previous_day)))*shape, 0, None)
+
     def predict(self, d: date, asof: date | None = None) -> tuple[np.ndarray, np.ndarray]:
-        """给出 d 的逐段负载 / 光伏点预测（kWh），只用日期 < asof（默认 d）的数据。"""
         cutoff = d if asof is None else asof
-        rows_l = self._rows(cutoff, self.k_load, day_type(d))
-        rows_p = self._rows(cutoff, self.k_pv)
-        load = self._load[rows_l].mean(axis=0) if rows_l.size else self.prior.load_kwh.copy()
-        pv = self._pv[rows_p].mean(axis=0) if rows_p.size else self.prior.pv_kwh.copy()
-        return np.asarray(load, dtype=float), np.asarray(pv, dtype=float)
+        if not self.reference_baseline:
+            rl, rp = self._rows(cutoff,self.k_load,day_type(d)), self._rows(cutoff,self.k_pv)
+            return (self._load[rl].mean(0) if rl.size else self.prior.load_kwh.copy(), self._pv[rp].mean(0) if rp.size else self.prior.pv_kwh.copy())
+        rows = self._rows(cutoff, 3)
+        return self._paper_load(d, cutoff), (self._pv[rows].mean(0) if rows.size else self.prior.pv_kwh.copy())
 
-    def predict_next(self, d: date) -> tuple[np.ndarray, np.ndarray]:
-        """次日曲线：对 d+1 作点预测，但仍只用日期 < d 的数据。"""
-        return self.predict(d + timedelta(days=1), asof=d)
-
+    def predict_next(self, d: date) -> tuple[np.ndarray, np.ndarray]: return self.predict(d + timedelta(days=1), asof=d)
     def predict_future(self, d: date, n_days: int) -> tuple[np.ndarray, np.ndarray]:
-        """决策日之后 n_days 天的点预测曲线，拼接成 (n_days*T,) 两条曲线。"""
-        if n_days <= 0:
-            return np.zeros(0), np.zeros(0)
-        loads, pvs = [], []
-        for k in range(1, n_days + 1):
-            load, pv = self.predict(d + timedelta(days=k), asof=d)
-            loads.append(load)
-            pvs.append(pv)
-        return np.concatenate(loads), np.concatenate(pvs)
+        if n_days <= 0: return np.zeros(0), np.zeros(0)
+        x = [self.predict(d+timedelta(days=k), asof=d) for k in range(1,n_days+1)]
+        return np.concatenate([z[0] for z in x]), np.concatenate([z[1] for z in x])
 
-
-__all__ = ["PointForecaster"]
+__all__ = ["LOW_START", "PointForecaster", "load_kind"]

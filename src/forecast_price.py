@@ -1,22 +1,4 @@
-"""预测/场景层：附件 4 波动电价的点预测与「电价来源」抽象。
-
-信息假设（论文声明）：附件 4 是事后真实电价，只用于结算与「已发生段」的观测。
-决策时刻 $(d, t_0)$ 只能看到日期 $<d$ 的整日电价与当天 $\\tau<t_0$ 的段电价。
-这条边界由两个入口统一把关：
-
-* `PriceForecaster._rows`：所有对历史电价矩阵的整行读取都先经过它取行号，
-  函数内部断言取到的行日期严格早于 asof（与 `forecast.PointForecaster._rows` 同构）；
-* `PriceForecaster.observed`：当天唯一的真值入口，只切 `[:t_now]`。
-
-`truth(d)` 返回整日真值，只允许结算与执行层调用。
-
-点预测：$\\hat p_t = \\lambda\\,\\bar p_t$，其中基准 $\\bar p$ 为日期 $<d$ 的最近 $K_p$ 个
-同类型日逐段均值（冷启动退回附件 1），日水平因子 $\\lambda$ 由当天已观测段做最小二乘
-$\\lambda = \\sum_{\\tau<t_0} p_\\tau\\bar p_\\tau / \\sum_{\\tau<t_0}\\bar p_\\tau^2$ 并裁剪到
-$[0.7, 1.3]$；$t_0=0$ 时 $\\lambda=1$（附件 4 的 $\\lambda$ lag-1 相关仅 0.52，昨日因子无用）。
-次日曲线 = 次日类型的基准 × 当前 $\\lambda$。
-"""
-
+"""Causal Q4 day-level × intraday-shape price forecasts."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,210 +7,204 @@ from typing import Protocol
 
 import numpy as np
 
-from .data import T, Attachment1, day_type
+from .data import Attachment1, T, day_type
 
-K_PRICE = 4  # 默认 $K_p$：最近同类型日的个数
-LAMBDA_LO, LAMBDA_HI = 0.7, 1.3  # 日水平因子的裁剪区间
+K_PRICE = 35
+PRICE_FLOOR = 1e-4
+LAMBDA_LO, LAMBDA_HI = 0.7, 1.3
 
 
 class PriceSource(Protocol):
-    """优化核与结算层看到的电价接口。
-
-    `varies` 为 False 时电价逐日恒定（问 2 / 问 3 的附件 1 常数电价），
-    调用方可以据此走「一次装配、不再更新代价向量」的快路径。
-    """
-
     varies: bool
-
-    def truth(self, d: date) -> np.ndarray:
-        """日期 d 的 144 段结算电价（事后真值）。"""
-
-    def predict(
-        self, d: date, t_now: int = 0, observed: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """决策时刻 $(d, t_{now})$ 可得的 (当天 144 段, 次日 144 段) 电价曲线。
-
-        当天前 $t_{now}$ 段填已观测真值，其余为点预测。
-        """
-
-    def residual(self, d: date, t_now: int = 0) -> np.ndarray | None:
-        """当天 $[t_{now}, 144)$ 段的「真值 − 该时刻点预测」，常数电价返回 None。"""
+    def truth(self, d: date) -> np.ndarray: ...
+    def predict(self, d: date, t_now: int = 0, observed=None, **kw): ...
+    def residual(self, d: date, t_now: int = 0): ...
 
 
 @dataclass
 class ConstantPriceSource:
-    """附件 1 的常数电价：问 2 / 问 3 的默认电价来源，逐日相同、无残差场景。"""
-
     price: np.ndarray
     varies: bool = False
-
-    def truth(self, d: date) -> np.ndarray:
-        del d
-        return self.price
-
-    def observed(self, d: date, t_now: int) -> np.ndarray:
-        del d
-        return self.price[: int(t_now)]
-
-    def predict(
-        self, d: date, t_now: int = 0, observed: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        del d, t_now, observed
-        return self.price, self.price
-
-    def residual(self, d: date, t_now: int = 0) -> np.ndarray | None:
-        del d, t_now
-        return None
+    def truth(self, d): return self.price
+    def observed(self, d, t_now): return self.price[:int(t_now)]
+    def predict(self, d, t_now=0, observed=None, **kw): return self.price, self.price
+    def residual(self, d, t_now=0): return None
 
 
 class PriceForecaster:
-    """附件 4 电价的 walk-forward 点预测器（决策侧唯一的电价入口）。"""
-
+    """Baseline Q4 forecaster; ``mode='legacy_level'`` enables old increment."""
     varies = True
 
-    def __init__(
-        self,
-        dates: list[date],
-        prices: np.ndarray,
-        prior: Attachment1,
-        k: int = K_PRICE,
-        *,
-        lambda_lo: float = LAMBDA_LO,
-        lambda_hi: float = LAMBDA_HI,
-    ):
+    def __init__(self, dates, prices, prior: Attachment1, k=K_PRICE, *,
+                 branch="q4_2", net_load=None, mode="baseline"):
+        if branch not in {"q4_2", "q4_3"}:
+            raise ValueError("branch must be 'q4_2' or 'q4_3'")
+        if mode not in {"baseline", "legacy_level"}:
+            raise ValueError("unknown price forecast mode")
         self.dates = list(dates)
-        self._price = np.asarray(prices, dtype=float)
-        assert self._price.shape[0] == len(self.dates)
-        self._types = np.array([day_type(d) for d in self.dates], dtype=int)
-        self._ord = np.array([d.toordinal() for d in self.dates], dtype=int)
+        self._price = np.asarray(prices, float)
         self._row = {d: i for i, d in enumerate(self.dates)}
-        self.prior = np.asarray(prior.price, dtype=float)
-        self.k = int(k)
-        self.lambda_lo = float(lambda_lo)
-        self.lambda_hi = float(lambda_hi)
-        self._baseline_cache: dict[tuple[int, int], np.ndarray] = {}
+        self._ord = np.array([d.toordinal() for d in self.dates])
+        self.prior = np.asarray(prior.price, float)
+        self.k, self.branch, self.net_load, self.mode = int(k), branch, net_load, mode
 
-    # -- 信息边界 -------------------------------------------------------------
+    def _validate_t(self, t_now):
+        t = int(t_now)
+        if t != t_now or not 0 <= t <= T:
+            raise ValueError("t_now must be an integer segment in [0, T]")
+        return t
 
-    def _rows(self, asof: date, k: int, dtype: int) -> np.ndarray:
-        """最近 k 个同类型历史日的行号；只含日期严格早于 asof 的行。"""
-        avail = (self._ord < asof.toordinal()) & (self._types == dtype)
-        rows = np.flatnonzero(avail)[-k:]
-        assert rows.size == 0 or int(self._ord[rows].max()) < asof.toordinal(), (
-            "walk-forward 违例：取到了不早于决策日的历史电价行"
-        )
+    def _rows(self, asof, k=None):
+        rows = np.flatnonzero(self._ord < asof.toordinal())[-(self.k if k is None else int(k)):]
+        assert not rows.size or self._ord[rows].max() < asof.toordinal()
         return rows
 
-    def observed(self, d: date, t_now: int) -> np.ndarray:
-        """当天已发生的段电价 $p_{d,\\tau},\\ \\tau<t_{now}$（决策侧唯一的当天真值入口）。"""
-        t_now = int(t_now)
-        assert 0 <= t_now <= T, f"段下标越界：{t_now}"
-        if t_now == 0:
-            return np.zeros(0)
-        return self._price[self._row[d], :t_now]
+    def observed(self, d, t_now):
+        return self._price[self._row[d], :self._validate_t(t_now)].copy()
 
-    def truth(self, d: date) -> np.ndarray:
-        """整日结算电价；只允许结算与执行层调用，不得进入预测路径。"""
+    def truth(self, d):
         return self._price[self._row[d]]
 
-    # -- 点预测 ---------------------------------------------------------------
+    def _shape(self, asof):
+        rows = self._rows(asof)
+        if not rows.size:
+            return self.prior / max(float(self.prior.mean()), PRICE_FLOOR)
+        levels = self._price[rows].mean(axis=1)
+        return np.mean(self._price[rows] / np.maximum(levels[:, None], PRICE_FLOOR), axis=0)
 
-    def baseline(self, d: date, asof: date | None = None) -> np.ndarray:
-        """日期 $<$ asof（默认 d）的最近 $K_p$ 个 d 类型日逐段均值；无历史时用附件 1。"""
+    def _net(self, d, t_now):
+        if self.net_load is None:
+            return None
+        try:
+            return float(self.net_load(d, t_now))
+        except TypeError:
+            return float(self.net_load(d))
+
+    def _fit(self, asof, branch, t_now):
+        rows = self._rows(asof)
+        if rows.size < 3:
+            return None
+        y = self._price[rows].mean(axis=1)
+        days = [self.dates[i] for i in rows]
+        if branch == "q4_3":
+            x = np.array([self._price[self._row[d - timedelta(days=1)]].mean()
+                          if d - timedelta(days=1) in self._row else np.nan for d in days])
+        else:
+            x = np.array([self._net(d, t_now) for d in days]) if self.net_load else np.full(len(days), np.nan)
+            x = x / 1e5
+        valid = np.isfinite(x)
+        if valid.sum() < 2:
+            return None
+        design = np.column_stack([np.ones(valid.sum()), x[valid]])
+        if np.linalg.matrix_rank(design) < 2:
+            return None
+        intercept, slope = np.linalg.lstsq(design, y[valid], rcond=None)[0]
+        return float(intercept), float(np.clip(slope, 0, .99) if branch == "q4_3" else slope)
+
+    def _rho_p(self, asof):
+        rows = self._rows(asof)
+        if rows.size < 3:
+            return 0.0
+        shape = self._shape(asof)
+        residual = (self._price[rows] / np.maximum(self._price[rows].mean(1)[:, None], PRICE_FLOOR) - shape).ravel()
+        denominator = float(residual[:-1] @ residual[:-1])
+        return 0.0 if denominator == 0 else float(np.clip((residual[:-1] @ residual[1:]) / denominator, 0, .99))
+
+    def baseline(self, d, asof=None):
         cutoff = d if asof is None else asof
-        key = (cutoff.toordinal(), day_type(d))
-        hit = self._baseline_cache.get(key)
-        if hit is not None:
-            return hit
-        rows = self._rows(cutoff, self.k, day_type(d))
-        base = self._price[rows].mean(axis=0) if rows.size else self.prior.copy()
-        base = np.asarray(base, dtype=float)
-        self._baseline_cache[key] = base
-        return base
+        rows = self._rows(cutoff)
+        level = self.prior.mean() if not rows.size else self._price[rows].mean()
+        return self._shape(cutoff) * max(float(level), .01)
 
-    def level_factor(self, base: np.ndarray, observed: np.ndarray) -> float:
-        """已观测段对基准的最小二乘水平因子 $\\lambda$，裁剪到 $[0.7, 1.3]$。"""
-        observed = np.asarray(observed, dtype=float).ravel()
-        n = observed.size
-        if n == 0:
+    def level_factor(self, base, observed):
+        base, observed = np.asarray(base, float)[:len(observed)], np.asarray(observed, float)
+        den = float(base @ base)
+        if not len(observed) or den <= 0:
             return 1.0
-        b = np.asarray(base, dtype=float)[:n]
-        denom = float(b @ b)
-        if denom <= 0.0:
-            return 1.0
-        return float(np.clip(float(observed @ b) / denom, self.lambda_lo, self.lambda_hi))
+        return float(np.clip((observed @ base) / den, LAMBDA_LO, LAMBDA_HI))
 
-    def predict(
-        self, d: date, t_now: int = 0, observed: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """决策时刻 $(d, t_{now})$ 的 (当天 144 段, 次日 144 段) 电价曲线。"""
-        t_now = int(t_now)
-        obs = self.observed(d, t_now) if observed is None else np.asarray(observed, float)
-        assert obs.size == t_now, "已观测段数与决策时刻不符"
-        base = self.baseline(d, asof=d)
-        lam = self.level_factor(base, obs)
-        today = np.empty(T)
-        today[:t_now] = obs
-        today[t_now:] = np.clip(lam * base[t_now:], 0.0, None)
-        base_next = self.baseline(d + timedelta(days=1), asof=d)
-        return today, np.clip(lam * base_next, 0.0, None)
+    def predict(self, d, t_now=0, observed=None, *, net_load_pred=None,
+                net_load_next=None, branch=None):
+        t = self._validate_t(t_now)
+        active_branch = self.branch if branch is None else branch
+        if active_branch not in {"q4_2", "q4_3"}:
+            raise ValueError("invalid branch")
+        obs = self.observed(d, t) if observed is None else np.asarray(observed, float)
+        if obs.size != t:
+            raise ValueError("observed must have exactly t_now values")
+        if self.mode == "legacy_level":
+            rows = np.flatnonzero(
+                (self._ord < d.toordinal())
+                & np.array([day_type(x) == day_type(d) for x in self.dates], dtype=bool)
+            )[-self.k:]
+            base = self._price[rows].mean(axis=0) if rows.size else self.prior.copy()
+            lam = self.level_factor(base, obs)
+            nxt_d = d + timedelta(days=1)
+            rows = np.flatnonzero(
+                (self._ord < d.toordinal())
+                & np.array([day_type(x) == day_type(nxt_d) for x in self.dates], dtype=bool)
+            )[-self.k:]
+            nxt_base = self._price[rows].mean(axis=0) if rows.size else self.prior.copy()
+            today = np.maximum(lam * base, PRICE_FLOOR)
+            today[:t] = obs
+            return today, np.maximum(lam * nxt_base, PRICE_FLOOR)
+        fit = self._fit(d, active_branch, t)
+        yesterday = self._price[self._row[d-timedelta(days=1)]].mean() if d-timedelta(days=1) in self._row else self.prior.mean()
+        if fit is None:
+            level = yesterday
+        elif active_branch == "q4_3":
+            level = fit[0] + fit[1] * yesterday
+        else:
+            feature = self._net(d, t) if net_load_pred is None else net_load_pred
+            level = fit[0] + fit[1] * (0.0 if feature is None else float(feature)) / 1e5
+        level = max(float(level), .01)
+        today = np.maximum(level * self._shape(d), PRICE_FLOOR)
+        rho, error = self._rho_p(d), 0.0
+        if t:
+            error = float(obs[-1] - today[t-1])
+            today[t:] = np.maximum(today[t:] + rho**np.arange(1, T-t+1)*error, PRICE_FLOOR)
+        today[:t] = obs
+        if fit is not None and active_branch == "q4_3":
+            next_level = fit[0] + fit[1] * level
+        elif fit is not None and net_load_next is not None:
+            next_level = fit[0] + fit[1] * float(net_load_next) / 1e5
+        else:
+            next_level = level
+        nxt = np.maximum(max(float(next_level), .01) * self._shape(d), PRICE_FLOOR)
+        if t:
+            nxt = np.maximum(nxt + rho**np.arange(T-t+1, 2*T-t+1)*error, PRICE_FLOOR)
+        return today, nxt
 
-    def residual(self, d: date, t_now: int = 0) -> np.ndarray:
-        """当天 $[t_{now}, 144)$ 段的「真值 − 该时刻点预测」，用于电价残差库。"""
-        t_now = int(t_now)
-        today, _ = self.predict(d, t_now)
-        return self.truth(d)[t_now:] - today[t_now:]
+    def residual(self, d, t_now=0):
+        t = self._validate_t(t_now)
+        predicted, _ = self.predict(d, t)
+        return self.truth(d)[t:] - predicted[t:]
+
+    def terminal_value(self, price_path, t_now=0):
+        t = self._validate_t(t_now)
+        path = np.asarray(price_path, float)
+        if path.ndim == 2:
+            path = path.mean(axis=0)
+        if path.ndim != 1:
+            raise ValueError("price_path must have shape (n,) or (M,n)")
+        if t == 0:
+            return float(path[:30].mean() / .9)
+        q = T - t
+        if path.size < q + 30:
+            raise ValueError("path does not cover next-day 0:00--5:00")
+        return float(path[q:q+30].mean() / .9)
 
 
 class PerfectPriceSource:
-    """完美电价信息变体：决策时直接看到当天与次日的真实电价（费用下界对比用）。"""
-
     varies = True
+    def __init__(self, dates, prices): self.dates=list(dates); self._price=np.asarray(prices,float); self._row={d:i for i,d in enumerate(self.dates)}
+    def truth(self,d): return self._price[self._row[d]]
+    def observed(self,d,t_now): return self.truth(d)[:int(t_now)]
+    def predict(self,d,t_now=0,observed=None,**kw):
+        nxt=d+timedelta(days=1); return self.truth(d), self._price[self._row[nxt]] if nxt in self._row else self.truth(d)
+    def residual(self,d,t_now=0): return None
 
-    def __init__(self, dates: list[date], prices: np.ndarray):
-        self.dates = list(dates)
-        self._price = np.asarray(prices, dtype=float)
-        self._row = {d: i for i, d in enumerate(self.dates)}
-        self._last = self.dates[-1]
+def horizon_price(src,d,t_now=0,n_days=2):
+    today,nxt=src.predict(d,t_now); return today if n_days<=1 else np.concatenate([today]+[nxt]*(n_days-1))
 
-    def truth(self, d: date) -> np.ndarray:
-        return self._price[self._row[d]]
-
-    def observed(self, d: date, t_now: int) -> np.ndarray:
-        return self._price[self._row[d], : int(t_now)]
-
-    def predict(
-        self, d: date, t_now: int = 0, observed: np.ndarray | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        del t_now, observed
-        nxt = d + timedelta(days=1)
-        next_price = self._price[self._row[nxt]] if nxt in self._row else self.truth(d)
-        return self.truth(d), next_price
-
-    def residual(self, d: date, t_now: int = 0) -> np.ndarray | None:
-        """完美信息下点预测无误差，故不生成电价残差场景。"""
-        del d, t_now
-        return None
-
-
-def horizon_price(
-    src: PriceSource, d: date, t_now: int = 0, n_days: int = 2
-) -> np.ndarray:
-    """决策时刻 $(d, t_{now})$ 的 $24n$ 小时电价向量：当天 144 段 ‖ 次日曲线重复 $n-1$ 次。"""
-    today, nxt = src.predict(d, t_now)
-    today = np.asarray(today, dtype=float)
-    if n_days <= 1:
-        return today
-    return np.concatenate([today] + [np.asarray(nxt, dtype=float)] * (n_days - 1))
-
-
-__all__ = [
-    "K_PRICE",
-    "LAMBDA_HI",
-    "LAMBDA_LO",
-    "ConstantPriceSource",
-    "PerfectPriceSource",
-    "PriceForecaster",
-    "PriceSource",
-    "horizon_price",
-]
+__all__=["K_PRICE","LAMBDA_LO","LAMBDA_HI","PRICE_FLOOR","ConstantPriceSource","PerfectPriceSource","PriceForecaster","PriceSource","horizon_price"]

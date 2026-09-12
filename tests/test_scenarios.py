@@ -1,8 +1,8 @@
 import numpy as np
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from src.data import T, day_type
-from src.scenarios import ResidualLibrary
+from src.scenarios import IssuedPathLibrary, ResidualLibrary
 
 
 def _fill(lib: ResidualLibrary, days: list[date], tag: float) -> None:
@@ -71,3 +71,32 @@ def test_library_update_is_incremental():
     _fill(lib, days, 1.0)
     assert len(lib.entries) == 10
     assert sum(len(v) for v in lib._by_type.values()) == 10
+
+
+def test_issued_paths_are_complete_paired_and_only_available_after_completion():
+    lib = IssuedPathLibrary(); d = date(2025, 1, 2)
+    for marker in (1., 2.):
+        lib.update(d - timedelta(days=int(marker)), 6, np.full(T, marker),
+                   np.full(T, -marker), np.full(T, 10*marker))
+    L,V,P = lib.scenarios(datetime(2025,1,2,6), 6, np.zeros(T), np.full(T, 5.), np.ones(T), m=1)
+    assert L.shape == V.shape == P.shape == (1,T)
+    assert np.all(L[0] == 1.) and np.all(V[0] == 4.) and np.all(P[0] == 11.)
+    L,_,_ = lib.scenarios(d-timedelta(days=1),6,np.ones(T),np.ones(T),m=30)
+    assert L.shape == (1,T)  # newest issuance has not completed yet
+    assert lib.select(d,6,m=0) == []
+    import pytest
+    with pytest.raises(ValueError):
+        lib.update(d - timedelta(days=1), 6, np.zeros(T), np.zeros(T))
+
+
+def test_issued_path_pool_can_explicitly_filter_day_type():
+    asof = datetime(2025, 1, 20, 5)  # Monday, before Sunday's path completes
+    full, typed = IssuedPathLibrary(), IssuedPathLibrary(same_type=True)
+    for lib in (full, typed):
+        lib.update(date(2025,1,17), 6, np.full(T, 1.), np.zeros(T))  # Friday type 1
+        lib.update(date(2025,1,18), 6, np.full(T, 2.), np.zeros(T))  # Saturday type 1
+        lib.update(date(2025,1,19), 6, np.full(T, 3.), np.zeros(T))  # Sunday type 0; not complete at 6
+    # Full pool chooses the latest completed Saturday; typed pool has no
+    # completed type-0 entry, so both expose their different selection rules.
+    assert full.select(asof, 6, 1)[0].r_load[0] == 2.
+    assert typed.select(asof, 6, 1) == []

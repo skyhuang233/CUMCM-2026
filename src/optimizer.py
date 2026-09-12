@@ -180,6 +180,27 @@ class LPResult:
     status: str = ""
 
 
+def eliminate_simultaneous_charge_discharge(
+    C: np.ndarray, D: np.ndarray, W: np.ndarray, *, eta: float = ETA
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Recover an equivalent mutually-exclusive LP action representation.
+
+    With zero throughput regularisation, a degenerate LP optimum can charge
+    and discharge simultaneously.  Reducing charge by ``a`` and discharge by
+    ``eta² a`` preserves internal SOC; the efficiency loss is moved to unused
+    supplied energy W.  Thus G, every SOC state, and the original objective
+    are unchanged without adding an artificial economic penalty.
+    """
+    c, d, w = (np.asarray(a, float).copy() for a in (C, D, W))
+    for t in range(c.size):
+        a = min(c[t], d[t] / (eta * eta))
+        if a > 0.0:
+            c[t] -= a
+            d[t] -= eta * eta * a
+            w[t] += (1.0 - eta * eta) * a
+    return c, d, w
+
+
 def solve_deterministic(
     price: np.ndarray,
     load_kwh: np.ndarray,
@@ -188,12 +209,13 @@ def solve_deterministic(
     *,
     periodic: bool = True,
     soc_end: float | None = None,
-    eps: float = EPS,
+    eps: float = 0.0,
 ) -> LPResult:
     """点预测曲线下的确定性购电 LP。
 
     periodic=True 时约束末段储电量回到 soc_init；soc_end 给出则改用该值。
-    目标 = Σ p_t G_t + eps·Σ(C_t + D_t + W_t)，报告的购电费不含 eps 项。
+    默认目标严格为 Σ p_t G_t。``eps`` 仅保留给旧实验显式传入；它不是
+    参考模型的经济费用，不能用于 Q1 的 LP/DP 一致性验证。
     """
     price = np.asarray(price, dtype=float)
     load_kwh = np.asarray(load_kwh, dtype=float)
@@ -238,11 +260,14 @@ def solve_deterministic(
         duals["periodic"] = float(marginals[row_periodic])
 
     G = layout.take(x, "G")
+    C, D, W = eliminate_simultaneous_charge_discharge(
+        layout.take(x, "C"), layout.take(x, "D"), layout.take(x, "W")
+    )
     return LPResult(
         G=G,
-        C=layout.take(x, "C"),
-        D=layout.take(x, "D"),
-        W=layout.take(x, "W"),
+        C=C,
+        D=D,
+        W=W,
         S=layout.take(x, "S"),
         E=np.zeros(n_seg),
         objective=float(res.fun),
@@ -397,6 +422,7 @@ def _fill_scenario_cost(
     price_h: np.ndarray,
     ps: np.ndarray | None,
     eps: float,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> None:
     """填入第二阶段各场景块的 sample-average 代价。
 
@@ -411,6 +437,9 @@ def _fill_scenario_cost(
         cost[block["W"] : block["W"] + n_h] = eps / m
         if n_future:
             cost[block["G"] : block["G"] + n_future] = p_w[struct.n_today :] / m
+        terminal = np.asarray(terminal_value, float)
+        value_w = float(terminal if terminal.ndim == 0 else terminal[w])
+        cost[block["S"] + n_h - 1] -= value_w / m
 
 
 def first_stage_price(
@@ -432,13 +461,14 @@ def saa_cost_vector(
     price_h: np.ndarray,
     ps: np.ndarray | None,
     eps: float,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> np.ndarray:
     """问 2 的 SAA LP 完整代价向量（第一阶段 G0 + 各场景块）。"""
     cost = np.zeros(struct.n_var)
     n_today = struct.n_today
     g0_off = struct.first["G"]
     cost[g0_off : g0_off + n_today] = first_stage_price(price_h, ps, n_today)
-    _fill_scenario_cost(cost, struct, price_h, ps, eps)
+    _fill_scenario_cost(cost, struct, price_h, ps, eps, terminal_value)
     return cost
 
 
@@ -452,31 +482,35 @@ def _solve_saa_core(
     eps: float,
     n_today: int,
     price_scen: np.ndarray | None = None,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> tuple[np.ndarray, SAAStructure, float, str]:
     price_h = np.asarray(price_h, dtype=float)
     L_scen = np.atleast_2d(np.asarray(L_scen, dtype=float))
     PV_scen = np.atleast_2d(np.asarray(PV_scen, dtype=float))
-    L_future = np.asarray(L_future, dtype=float).ravel()
-    PV_future = np.asarray(PV_future, dtype=float).ravel()
+    L_future = np.asarray(L_future, dtype=float)
+    PV_future = np.asarray(PV_future, dtype=float)
 
     m = L_scen.shape[0]
     n_future = price_h.size - n_today
     assert L_scen.shape == (m, n_today) and PV_scen.shape == (m, n_today)
-    assert L_future.size == n_future and PV_future.size == n_future
+    if L_future.ndim == 1:
+        L_future = np.tile(L_future[None, :], (m, 1))
+    if PV_future.ndim == 1:
+        PV_future = np.tile(PV_future[None, :], (m, 1))
+    assert L_future.shape == (m, n_future) and PV_future.shape == (m, n_future)
     assert PV_scen.shape[0] == m
 
     struct = _saa_structure(m, n_today, n_future)
     ps = _scen_price(price_scen, m, struct.n_h)
-    cost = saa_cost_vector(struct, price_h, ps, eps)
+    cost = saa_cost_vector(struct, price_h, ps, eps, terminal_value)
 
-    net_future = L_future - PV_future
     soc_rhs = np.zeros(struct.n_h)
     soc_rhs[0] = float(soc_init)
     b_eq = np.empty(m * struct.rows_per_scen)
     for w in range(m):
         base = w * struct.rows_per_scen
         b_eq[base : base + n_today] = L_scen[w] - PV_scen[w]
-        b_eq[base + n_today : base + struct.n_h] = net_future
+        b_eq[base + n_today : base + struct.n_h] = L_future[w] - PV_future[w]
         b_eq[base + struct.n_h : base + struct.rows_per_scen] = soc_rhs
 
     res = linprog(
@@ -498,10 +532,11 @@ def solve_saa(
     L_future: np.ndarray,
     PV_future: np.ndarray,
     soc_init: float = SOC_INIT,
-    eps: float = EPS,
+    eps: float = 0.0,
     *,
     n_today: int = T,
     price_scen: np.ndarray | None = None,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> SAAResult:
     """0:00 的 SAA 两阶段购电 LP。
 
@@ -517,7 +552,7 @@ def solve_saa(
     SAA 场景解，避免把场景均值误标为「残差为零」的点预测解。
     """
     x, struct, obj, status = _solve_saa_core(
-        price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today, price_scen
+        price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today, price_scen, terminal_value
     )
     price_h = np.asarray(price_h, dtype=float)
     g0_off = struct.first["G"]
@@ -543,16 +578,17 @@ def solve_saa_point(
     L_future: np.ndarray,
     PV_future: np.ndarray,
     soc_init: float = SOC_INIT,
-    eps: float = EPS,
+    eps: float = 0.0,
     *,
     n_today: int = T,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> LPResult:
     """点预测曲线下的 48h 确定性 LP（M=1 的 SAA），返回完整轨迹。"""
     price_h = np.asarray(price_h, dtype=float)
     L0 = np.asarray(L0, dtype=float).ravel()
     PV0 = np.asarray(PV0, dtype=float).ravel()
     x, struct, obj, status = _solve_saa_core(
-        price_h, L0[None, :], PV0[None, :], L_future, PV_future, soc_init, eps, n_today
+        price_h, L0[None, :], PV0[None, :], L_future, PV_future, soc_init, eps, n_today, None, terminal_value
     )
     block = struct.blocks[0]
     n_h, n_future = struct.n_h, struct.n_future
@@ -753,10 +789,11 @@ def solve_readjust(
     L_next: np.ndarray,
     PV_next: np.ndarray,
     soc_init: float,
-    eps: float = EPS,
+    eps: float = 0.0,
     *,
     n_day: int = T,
     price_scen: np.ndarray | None = None,
+    terminal_value: float | np.ndarray = 0.0,
 ) -> ReadjustResult:
     """预报时刻 $t_0$ 的重优化：在冻结的 $G^0$ 上决定调整量 $\\Delta^\\pm$。
 
@@ -776,15 +813,19 @@ def solve_readjust(
     G0 = np.asarray(G0, dtype=float)
     L_scen = np.atleast_2d(np.asarray(L_scen, dtype=float))
     PV_scen = np.atleast_2d(np.asarray(PV_scen, dtype=float))
-    L_next = np.asarray(L_next, dtype=float).ravel()
-    PV_next = np.asarray(PV_next, dtype=float).ravel()
+    L_next = np.asarray(L_next, dtype=float)
+    PV_next = np.asarray(PV_next, dtype=float)
 
     n_rem = n_day - t0
     n_future = price48.size - n_day
     m = L_scen.shape[0]
     assert G0.size == n_day and 0 <= t0 < n_day
     assert L_scen.shape == (m, n_rem) and PV_scen.shape == (m, n_rem)
-    assert L_next.size == n_future and PV_next.size == n_future
+    if L_next.ndim == 1:
+        L_next = np.tile(L_next[None, :], (m, 1))
+    if PV_next.ndim == 1:
+        PV_next = np.tile(PV_next[None, :], (m, 1))
+    assert L_next.shape == (m, n_future) and PV_next.shape == (m, n_future)
 
     price_h = np.concatenate([price48[t0:n_day], price48[n_day:]])
     g0_rem = G0[t0:]
@@ -800,19 +841,18 @@ def solve_readjust(
     cost = np.zeros(struct.n_var)
     cost[dp_off : dp_off + n_rem] = ADJUST_UP * price_first
     cost[dm_off : dm_off + n_rem] = -ADJUST_DOWN * price_first
-    _fill_scenario_cost(cost, struct, price_h, ps, eps)
+    _fill_scenario_cost(cost, struct, price_h, ps, eps, terminal_value)
 
     bounds = struct.bounds.copy()
     bounds[dm_off : dm_off + n_rem, 1] = np.maximum(g0_rem, 0.0)  # Δ⁻_t ≤ G0_t ⇒ G^a ≥ 0
 
-    net_future = L_next - PV_next
     soc_rhs = np.zeros(struct.n_h)
     soc_rhs[0] = float(soc_init)
     b_eq = np.empty(m * struct.rows_per_scen)
     for w in range(m):
         base = w * struct.rows_per_scen
         b_eq[base : base + n_rem] = L_scen[w] - PV_scen[w] - g0_rem
-        b_eq[base + n_rem : base + struct.n_h] = net_future
+        b_eq[base + n_rem : base + struct.n_h] = L_next[w] - PV_next[w]
         b_eq[base + struct.n_h : base + struct.rows_per_scen] = soc_rhs
 
     res = linprog(cost, A_eq=struct.a_eq, b_eq=b_eq, bounds=bounds, method="highs")

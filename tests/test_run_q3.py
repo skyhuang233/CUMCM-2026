@@ -17,10 +17,10 @@ def bundle():
 def short_run(bundle):
     res = run_period(
         date(2025, 1, 1),
-        date(2025, 1, 4),
+        date(2025, 2, 2),
         Params(step_minutes=60),
         bundle,
-        record_from=date(2025, 1, 2),
+        record_from=date(2025, 2, 1),
         soc_init=SOC_INIT,
     )
     return bundle, res
@@ -45,18 +45,18 @@ def test_readjustment_only_moves_the_current_block(bundle):
     """6:00 重优化后只有 36–71 段可能变，72–143 段直到 12:00 之前仍等于 $G^0$。"""
     only_six = run_period(
         date(2025, 1, 1),
-        date(2025, 1, 2),
+        date(2025, 2, 2),
         Params(step_minutes=60, issues=(0, 6)),
         bundle,
-        record_from=date(2025, 1, 2),
+        record_from=date(2025, 2, 2),
         soc_init=SOC_INIT,
     )
     six_and_twelve = run_period(
         date(2025, 1, 1),
-        date(2025, 1, 2),
+        date(2025, 2, 2),
         Params(step_minutes=60, issues=(0, 6, 12)),
         bundle,
-        record_from=date(2025, 1, 2),
+        record_from=date(2025, 2, 2),
         soc_init=SOC_INIT,
     )
     a, b = only_six.days[0], six_and_twelve.days[0]
@@ -130,6 +130,73 @@ def test_issue_set_must_contain_midnight(bundle):
             Params(step_minutes=60, issues=(6, 12)),
             bundle,
         )
+
+
+def test_default_q3_builds_one_hbar_per_issue_and_skips_point_lps(monkeypatch, bundle):
+    import src.run_q3 as q3
+
+    point_calls = []
+    hbar_calls = []
+    original_point = q3.solve_saa_point
+    original_future = q3.future_cost
+
+    def point_spy(*args, **kwargs):
+        point_calls.append(1)
+        return original_point(*args, **kwargs)
+
+    def future_spy(*args, **kwargs):
+        hbar_calls.append(1)
+        return original_future(*args, **kwargs)
+
+    monkeypatch.setattr(q3, "solve_saa_point", point_spy)
+    monkeypatch.setattr(q3, "future_cost", future_spy)
+    run_period(
+        date(2025, 1, 1), date(2025, 2, 1), Params(m_scen=2), bundle,
+        record_from=date(2025, 2, 1), soc_init=SOC_INIT,
+    )
+    assert point_calls == []
+    assert len(hbar_calls) == 4
+
+
+def test_checkpoint_resume_matches_an_uninterrupted_q3_run(tmp_path, monkeypatch, bundle):
+    """Issued-path libraries and SOC survive an interruption at a day boundary."""
+    import src.run_q3 as q3
+
+    params = Params(m_scen=1)
+    checkpoint = tmp_path / "q3.pkl"
+    original = q3.future_cost
+    calls = 0
+
+    def interrupted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 5:  # Four Feb 1 issue times completed and were checkpointed.
+            raise RuntimeError("intentional interruption")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(q3, "future_cost", interrupted)
+    with pytest.raises(RuntimeError, match="intentional"):
+        run_period(
+            date(2025, 1, 1), date(2025, 2, 2), params, bundle,
+            record_from=date(2025, 2, 1), checkpoint_path=checkpoint,
+        )
+    assert checkpoint.exists()
+    monkeypatch.setattr(q3, "future_cost", original)
+
+    resumed = run_period(
+        date(2025, 1, 1), date(2025, 2, 2), params, bundle,
+        record_from=date(2025, 2, 1), checkpoint_path=checkpoint, resume=True,
+    )
+    clean = run_period(
+        date(2025, 1, 1), date(2025, 2, 2), params, bundle,
+        record_from=date(2025, 2, 1),
+    )
+    assert resumed.total_cost == clean.total_cost
+    for got, expected in zip(resumed.days, clean.days):
+        assert got.day == expected.day
+        assert np.array_equal(got.G0, expected.G0)
+        assert np.array_equal(got.Ga, expected.Ga)
+        assert np.array_equal(got.S, expected.S)
 
 
 def test_no_future_data_reaches_any_decision(bundle):

@@ -19,10 +19,10 @@ from .value_dp import evaluate_plan
 
 def _evaluate_candidate(args):
     """Pickle-friendly process entry point; preserves ``evaluate_plan`` API."""
-    candidate, load_scen, pv_scen, price, soc_init, terminal_value, price_scen, base_plan = args
+    candidate, load_scen, pv_scen, price, soc_init, terminal_value, price_scen, base_plan, n_fixed = args
     return evaluate_plan(
         candidate, load_scen, pv_scen, price, soc_init, terminal_value,
-        price_scen=price_scen, base_plan=base_plan, return_hbar=True,
+        price_scen=price_scen, base_plan=base_plan, n_fixed=n_fixed, return_hbar=True,
     )
 
 
@@ -59,6 +59,7 @@ class CandidateEvaluator:
         *,
         price_scen=None,
         base_plan=None,
+        n_fixed=None,
     ) -> list[tuple[float, list]]:
         """Return ordered ``(score, future_cost_functions)`` pairs.
 
@@ -70,7 +71,7 @@ class CandidateEvaluator:
         """
         tasks = [
             (candidate, load_scen, pv_scen, price, soc_init, terminal_value,
-             price_scen, base_plan)
+             price_scen, base_plan, n_fixed)
             for candidate in candidates
         ]
         if self._pool is None or len(tasks) < 2:

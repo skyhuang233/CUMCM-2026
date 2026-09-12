@@ -8,13 +8,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 import numpy as np
 
 from .data import day_type
 
-M_SCEN = 12  # 默认场景数
+M_SCEN = 30  # 参考论文：最近 30 个日历日残差场景
 
 
 def _price_scenarios(
@@ -60,6 +60,7 @@ class ResidualLibrary:
 
     entries: list[ResidualEntry] = field(default_factory=list)
     _by_type: dict[int, list[ResidualEntry]] = field(default_factory=dict)
+    reference_baseline: bool = True
 
     def update(
         self,
@@ -87,7 +88,10 @@ class ResidualLibrary:
 
     def select(self, d: date, m: int = M_SCEN) -> list[ResidualEntry]:
         """决策日 d 可用的最近 m 个同类型历史日残差（日期严格早于 d）。"""
-        pool = [e for e in self._by_type.get(day_type(d), []) if e.day < d]
+        if self.reference_baseline:
+            pool = [e for e in self.entries if e.day < d]
+        else:
+            pool = [e for e in self._by_type.get(day_type(d), []) if e.day < d]
         return pool[-int(m):] if m > 0 else []
 
     def scenarios(
@@ -203,4 +207,55 @@ class PVResidualLibraryByIssue:
         )
 
 
-__all__ = ["M_SCEN", "ResidualEntry", "ResidualLibrary", "PVResidualLibraryByIssue"]
+@dataclass
+class IssuedPathLibrary:
+    """Complete 24h, three-channel residual paths keyed by publication hour.
+
+    An entry is selectable only after its whole path (including the following
+    morning for 6/12/18 issues) has happened.  This is the safe API for the
+    new rolling implementation; legacy libraries above remain for increments.
+    """
+    entries: dict[int, list[ResidualEntry]] = field(default_factory=dict)
+    same_type: bool = False
+
+    def update(self, issued: date, issue_hour: int, r_load: np.ndarray,
+               r_pv: np.ndarray, r_price: np.ndarray | None = None) -> None:
+        h = int(issue_hour); n = len(np.asarray(r_load))
+        if n != 144 or len(np.asarray(r_pv)) != 144:
+            raise ValueError("issued residual paths must contain exactly 24 hours")
+        if any(e.day == issued for e in self.entries.get(h, [])):
+            raise ValueError("a publication may have only one residual path")
+        self.entries.setdefault(h, []).append(ResidualEntry(issued, h, np.asarray(r_load,float), np.asarray(r_pv,float), None if r_price is None else np.asarray(r_price,float)))
+
+    def select(self, asof: date | datetime, issue_hour: int, m: int = M_SCEN) -> list[ResidualEntry]:
+        # Completion is issued + 24h; at a same-day issue this excludes it.
+        if int(m) <= 0:
+            return []
+        # A date remains accepted as its 00:00 timestamp for the existing Q2
+        # daily caller.  Datetime callers get the exact 6/12/18 completion
+        # boundary: (issued day, issue hour) + 24 hours.
+        asof_dt = datetime.combine(asof, time.min) if isinstance(asof, date) and not isinstance(asof, datetime) else asof
+        h = int(issue_hour)
+        done = [e for e in self.entries.get(h, [])
+                if datetime.combine(e.day, time(hour=h)) + timedelta(hours=24) <= asof_dt]
+        if self.same_type:
+            asof_day = asof_dt.date()
+            done = [e for e in done if day_type(e.day) == day_type(asof_day)]
+        done.sort(key=lambda e: e.day)
+        return done[-int(m):]
+
+    def scenarios(self, asof: date | datetime, issue_hour: int, load: np.ndarray, pv: np.ndarray,
+                  price: np.ndarray | None = None, m: int = M_SCEN):
+        chosen = self.select(asof, issue_hour, m)
+        l, v = np.asarray(load,float), np.asarray(pv,float)
+        if not chosen:
+            p = None if price is None else np.asarray(price,float)[None,:].copy()
+            return l[None,:].copy(), v[None,:].copy(), p
+        L = np.clip(l[None,:] + np.stack([e.r_load for e in chosen]), 0, None)
+        V = np.clip(v[None,:] + np.stack([e.r_pv for e in chosen]), 0, None)
+        if price is None or any(e.r_price is None for e in chosen): return L,V,None
+        P = np.clip(np.asarray(price,float)[None,:] + np.stack([e.r_price for e in chosen]), 1e-4, None)
+        return L,V,P
+
+
+__all__ = ["IssuedPathLibrary", "M_SCEN", "ResidualEntry", "ResidualLibrary", "PVResidualLibraryByIssue"]

@@ -1,0 +1,64 @@
+使用参数 K_L=6, K_P=7（论文基线默认）
+
+回测 2025-01-01 → 2025-12-31（2025-02-01 起计入结果），预报时刻 (0,)
+  [2025-03-01] 已完成 60 天，
+  [2025-03-31] 已完成 90 天，
+  [2025-04-30] 已完成 120 天，
+  [2025-05-30] 已完成 150 天，
+  [2025-06-29] 已完成 180 天，
+  [2025-07-29] 已完成 210 天，
+  [2025-08-28] 已完成 240 天，
+  [2025-09-27] 已完成 270 天，
+  [2025-10-27] 已完成 300 天，
+  [2025-11-26] 已完成 330 天，
+  [2025-12-26] 已完成 360 天，
+  用时 608.9s
+
+回测 2025-01-01 → 2025-12-31（2025-02-01 起计入结果），预报时刻 (0, 6)
+  [2025-03-01] 已完成 60 天，
+  [2025-03-31] 已完成 90 天，
+  [2025-04-30] 已完成 120 天，
+  [2025-05-30] 已完成 150 天，
+  [2025-06-29] 已完成 180 天，
+  [2025-07-29] 已完成 210 天，
+  [2025-08-28] 已完成 240 天，
+  [2025-09-27] 已完成 270 天，
+  [2025-10-27] 已完成 300 天，
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/huangbohan/国赛数模/src/run_q3.py", line 639, in <module>
+    main()
+    ~~~~^^
+  File "/Users/huangbohan/国赛数模/src/run_q3.py", line 592, in main
+    res = run_period(
+        WARMUP_START,
+    ...<17 lines>...
+        progress=args.progress,
+    )
+  File "/Users/huangbohan/国赛数模/src/run_q3.py", line 363, in run_period
+    saa = solve_saa(price48, L[:, :q], PV[:, :q], future_l, future_pv, soc_block,
+                    n_today=q, price_scen=p48_scen,
+                    terminal_value=0.0 if use_48h else terminal_rate)
+  File "/Users/huangbohan/国赛数模/src/optimizer.py", line 554, in solve_saa
+    x, struct, obj, status = _solve_saa_core(
+                             ~~~~~~~~~~~~~~~^
+        price_h, L_scen, PV_scen, L_future, PV_future, soc_init, eps, n_today, price_scen, terminal_value
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/huangbohan/国赛数模/src/optimizer.py", line 516, in _solve_saa_core
+    res = linprog(
+        cost,
+    ...<3 lines>...
+        method="highs",
+    )
+  File "/Users/huangbohan/国赛数模/.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py", line 660, in linprog
+    sol = _linprog_highs(lp, solver=highs_solvers[meth],
+                         **solver_options)
+  File "/Users/huangbohan/国赛数模/.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_highs.py", line 355, in _linprog_highs
+    res = _highs_wrapper(c, A.indptr, A.indices, A.data, lhs, rhs,
+                         lb, ub, integrality.astype(np.uint8), options)
+  File "/Users/huangbohan/国赛数模/.venv/lib/python3.13/site-packages/scipy/optimize/_highspy/_highs_wrapper.py", line 206, in _highs_wrapper
+    run_status = highs.run()
+KeyboardInterrupt

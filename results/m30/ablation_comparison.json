@@ -1,0 +1,44 @@
+[
+  {
+    "branch": "q2",
+    "variant": "48h",
+    "total_cost": 13529635.249530979,
+    "delta_yuan": -36761.01002467796,
+    "delta_percent": -0.2709710767793982
+  },
+  {
+    "branch": "q2",
+    "variant": "candidates",
+    "total_cost": 13566396.259555656,
+    "delta_yuan": 0.0,
+    "delta_percent": 0.0
+  },
+  {
+    "branch": "q2",
+    "variant": "legacy_means",
+    "total_cost": 13770638.368048685,
+    "delta_yuan": 204242.1084930282,
+    "delta_percent": 1.5055000943907104
+  },
+  {
+    "branch": "q2",
+    "variant": "same_type",
+    "total_cost": 13608513.170933843,
+    "delta_yuan": 42116.911378186196,
+    "delta_percent": 0.31045025202268167
+  },
+  {
+    "branch": "q4_2",
+    "variant": "48h",
+    "total_cost": 14229899.73275636,
+    "delta_yuan": -40706.980557015166,
+    "delta_percent": -0.28525052490612535
+  },
+  {
+    "branch": "q4_3",
+    "variant": "candidates",
+    "total_cost": 13716937.074094135,
+    "delta_yuan": -34.96394845843315,
+    "delta_percent": -0.0002548955291405733
+  }
+]

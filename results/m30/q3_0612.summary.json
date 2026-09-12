@@ -1,0 +1,26 @@
+{
+  "total_cost": 13075459.34,
+  "plan_cost": 12538600.1,
+  "curtail_cost": 113850.85,
+  "extra_cost": 157223.02,
+  "emergency_cost": 265785.37,
+  "plan_kwh": 20671181.4,
+  "emergency_kwh": 51124.96,
+  "complete_year": true,
+  "initial_soc": 6000,
+  "soc_end": 9690.9216,
+  "config": {
+    "branch": "q3",
+    "variant": "baseline",
+    "issues": "0612",
+    "m": 30
+  },
+  "provenance": {
+    "kind": "completed CLI log and rounded workbook",
+    "log": "results/m30/q3_0612.log",
+    "workbook": "results/m30/result3_0612.xlsx",
+    "cost_precision_yuan": 0.01,
+    "workbook_sha256": "e1b7af7c62084edafa900d3a758ca8ee9ae6ca526a215ed9539b05f2136d10f1",
+    "full_resolution_trace_available": false
+  }
+}

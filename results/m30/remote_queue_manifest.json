@@ -1,0 +1,157 @@
+{
+  "queue": "m30-remote",
+  "created": 1789205668.940255,
+  "max_workers": 4,
+  "tasks": [
+    {
+      "name": "q3_48h",
+      "branch": "q3",
+      "variant": "48h",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q3_legacy_means",
+      "branch": "q3",
+      "variant": "legacy_means",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q3_same_type",
+      "branch": "q3",
+      "variant": "same_type",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_2_legacy_means",
+      "branch": "q4_2",
+      "variant": "legacy_means",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_2_same_type",
+      "branch": "q4_2",
+      "variant": "same_type",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_2_legacy_price",
+      "branch": "q4_2",
+      "variant": "legacy_price",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_3_48h",
+      "branch": "q4_3",
+      "variant": "48h",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_3_legacy_means",
+      "branch": "q4_3",
+      "variant": "legacy_means",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_3_same_type",
+      "branch": "q4_3",
+      "variant": "same_type",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    },
+    {
+      "name": "q4_3_legacy_price",
+      "branch": "q4_3",
+      "variant": "legacy_price",
+      "config": {
+        "end": "2025-12-31",
+        "m": 30,
+        "k_load": 6,
+        "k_pv": 7,
+        "k_price": 35,
+        "candidate_workers": 1
+      },
+      "status": "dry-run",
+      "reason": null
+    }
+  ]
+}

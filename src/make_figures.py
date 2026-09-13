@@ -161,32 +161,25 @@ def fig_f02():
 def fig_f03():
     with np.load(M30 / "q1.trace.npz") as z:
         t1 = {k: z[k].copy() for k in z.files}
-    fig, axes = plt.subplots(3, 1, figsize=(6.2, 5.6), sharex=True)
-    axes[0].step(HOURS, t1["price"], where="pre", color=C_GRAY, lw=1.1)
-    axes[0].set_ylabel("电价（元/kWh）")
-    axes[0].set_title("(a) 附件 1 电价", fontsize=8.5, loc="left")
+    fig, axes = plt.subplots(2, 1, figsize=(6.2, 4.2), sharex=True,
+                             gridspec_kw={"height_ratios": [2.4, 1]})
 
-    axes[1].plot(HOURS, t1["load"] * 6, color=C_GRAY, lw=1.2, label="负载")
-    axes[1].plot(HOURS, t1["pv"] * 6, color=C_GREEN, lw=1.2, label="光伏")
-    axes[1].set_ylabel("功率（kW）")
-    axes[1].legend(frameon=False, ncol=2, loc="upper right")
-    axes[1].set_title("(b) 负载与光伏点预测", fontsize=8.5, loc="left")
+    # (a) 负载 + 光伏 + 购电功率 合在同一轴
+    axes[0].plot(HOURS, t1["load"] * 6, color=C_GRAY, lw=1.3, label="负载")
+    axes[0].plot(HOURS, t1["pv"] * 6, color=C_GREEN, lw=1.2, ls="--", label="光伏")
+    axes[0].step(HOURS, t1["G"] * 6, where="pre", color=C_BLUE, lw=1.2, label="计划购电")
+    axes[0].set_ylabel("功率（kW）")
+    axes[0].legend(frameon=False, ncol=3, loc="upper right")
+    axes[0].set_title("(a) 负载、光伏与计划购电功率", fontsize=8.5, loc="left")
 
-    axes[2].step(HOURS, t1["G"] * 6, where="pre", color=C_BLUE, lw=1.2, label="购电量")
-    axes[2].set_ylabel("购电功率（kW）")
-    ax2 = axes[2].twinx()
-    ax2.plot(np.r_[0, HOURS], np.r_[data.SOC_INIT, t1["S"]], color=C_GREEN, lw=1.2, label="储电量")
-    ax2.set_ylabel("储电量（kWh）")
-    ax2.grid(False)
-    ax2.spines["top"].set_visible(False)
-    h1, l1 = axes[2].get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    axes[2].legend(h1 + h2, l1 + l2, frameon=False, ncol=2, loc="lower right",
-                   bbox_to_anchor=(1.0, 1.0))
-    axes[2].set_title("(c) 计划购电与储电量轨迹", fontsize=8.5, loc="left")
-    axes[2].set_xlabel("时刻（h）")
-    axes[2].set_xlim(0, 24)
-    axes[2].set_xticks(range(0, 25, 4))
+    # (b) 储电量轨迹
+    axes[1].plot(np.r_[0, HOURS], np.r_[data.SOC_INIT, t1["S"]], color=C_GREEN, lw=1.3)
+    axes[1].set_ylabel("储电量（kWh）")
+    axes[1].set_ylim(0, 12000)
+    axes[1].set_title("(b) 储电量轨迹", fontsize=8.5, loc="left")
+    axes[1].set_xlabel("时刻（h）")
+    axes[1].set_xlim(0, 24)
+    axes[1].set_xticks(range(0, 25, 4))
     fig.tight_layout()
     return save(fig, "fig_f03_q1_day")
 

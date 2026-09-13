@@ -56,14 +56,38 @@
 
 \begin{thebibliography}{15}
 \bibitem{problem} 2026年高教社杯全国大学生数学建模竞赛C题及附件1--4[Z]. 2026.
+\bibitem{wangcs} 王成山, 武震, 李鹏. 微电网关键技术研究[J]. 电工技术学报, 2014, 29(2): 1--12.
+\bibitem{liuyx} 刘一欣, 郭力, 王成山. 微电网两阶段鲁棒优化经济调度方法[J]. 中国电机工程学报, 2018, 38(14): 4013--4022.
+\bibitem{kangcq} 康重庆, 夏清, 张伯明. 电力系统负荷预测研究综述与发展方向的探讨[J]. 电力系统自动化, 2004, 28(17): 1--11.
 \bibitem{saa-book} Shapiro A, Dentcheva D, Ruszczy\'nski A. Lectures on Stochastic Programming: Modeling and Theory[M]. Philadelphia: SIAM, 2009.
+\bibitem{birge} Birge J R, Louveaux F. Introduction to Stochastic Programming[M]. 2nd ed. New York: Springer, 2011.
+\bibitem{kleywegt} Kleywegt A J, Shapiro A, Homem-de-Mello T. The sample average approximation method for stochastic discrete optimization[J]. SIAM Journal on Optimization, 2002, 12(2): 479--502.
+\bibitem{bertsekas} Bertsekas D P. Dynamic Programming and Optimal Control: Vol.~I[M]. 4th ed. Belmont: Athena Scientific, 2017.
 \bibitem{rockafellar} Rockafellar R T. Convex Analysis[M]. Princeton: Princeton University Press, 1970.
+\bibitem{parisio} Parisio A, Rikos E, Glielmo L. A model predictive control approach to microgrid operation optimization[J]. IEEE Transactions on Control Systems Technology, 2014, 22(5): 1813--1827.
+\bibitem{luo} Luo X, Wang J, Dooner M, et al. Overview of current development in electrical energy storage technologies and the application potential in power system operation[J]. Applied Energy, 2015, 137: 511--536.
+\bibitem{hejazi} Akhavan-Hejazi H, Mohsenian-Rad H. Optimal operation of independent storage systems in energy and reserve markets with high wind penetration[J]. IEEE Transactions on Smart Grid, 2014, 5(2): 1088--1097.
+\bibitem{hong} Hong T, Fan S. Probabilistic electric load forecasting: A tutorial review[J]. International Journal of Forecasting, 2016, 32(3): 914--938.
+\bibitem{antonanzas} Antonanzas J, Osorio N, Escobar R, et al. Review of photovoltaic power forecasting[J]. Solar Energy, 2016, 136: 78--111.
+\bibitem{weron} Weron R. Electricity price forecasting: A review of the state-of-the-art with a look into the future[J]. International Journal of Forecasting, 2014, 30(4): 1030--1081.
 \bibitem{scipy} Virtanen P, Gommers R, Oliphant T E, et al. SciPy 1.0: Fundamental algorithms for scientific computing in Python[J]. Nature Methods, 2020, 17(3): 261--272.
 \end{thebibliography}
 
 \newpage
 \appendix
 \section{支撑材料文件列表与源程序}
-支撑材料包含：全部源程序（\texttt{src/} 目录：数据读取、优化核、预测与场景、DP 价值执行器、结算与结果导出）、结果文件 result1--result4-3.xlsx、全年实验汇总与独立复核记录。核心求解环境为 Python 3.13 + SciPy（HiGHS 线性规划）。以下给出优化核与执行器的关键源代码，完整代码见支撑材料。
-% U6 终检时插入 lstlisting 源码清单
+支撑材料包含：全部源程序（\texttt{src/} 目录：数据读取、优化核、预测与场景、DP 价值执行器、结算与结果导出）、结果文件 result1--result4-3.xlsx、全年实验汇总与独立复核记录。核心求解环境为 Python 3.13 + SciPy（HiGHS 线性规划）。以下给出优化核与 DP 价值执行器的关键源代码，其余模块见支撑材料。
+
+\lstset{language=Python,basicstyle=\ttfamily\scriptsize,breaklines=true,
+  numbers=left,numberstyle=\tiny,frame=single,tabsize=4,
+  showstringspaces=false,columns=flexible}
+
+\subsection{优化核（optimizer.py，节选：确定性 LP 与 SAA）}
+\lstinputlisting[firstline=204,lastline=290]{../../src/optimizer.py}
+
+\subsection{凸折线价值函数与动态规划（value\_dp.py，节选）}
+\lstinputlisting[firstline=328,lastline=428]{../../src/value_dp.py}
+
+\subsection{DP 价值执行器（executor.py，节选）}
+\lstinputlisting[firstline=211,lastline=234]{../../src/executor.py}
 \end{document}

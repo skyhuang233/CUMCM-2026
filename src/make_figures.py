@@ -117,11 +117,13 @@ def fig_f01():
          "预测与场景输入\n分解式负载预测 + 配对残差",
          "样本平均近似\n0:00 冻结计划购电量",
          "$\\bar H_t(e)$：动态保留\n因果充放电执行"),
-        ("问 3  ·  滚动调整", .45, .92, "#EAF0F6", "#244F73",
+        # The snake layout follows the actual information progression:
+        # Q1 -> Q2 -> Q3 -> Q4.
+        ("问 3  ·  滚动调整", 6.55, .92, "#EAF0F6", "#244F73",
          "信息逐级发布\n正式光伏预报：0 / 6 / 12 / 18 时",
          "滚动重优化\n冻结计划 + 日内调整权限",
          "$\\bar H_{t\\mid\\tau}(e)$：\n调整、紧急费与下一轮更新"),
-        ("问 4  ·  波动电价", 6.55, .92, "#F8EEE8", "#B95541",
+        ("问 4  ·  波动电价", .45, .92, "#F8EEE8", "#B95541",
          "新增价格场景\n水平 × 日内形状，三通道配对",
          "两分支价格优化\n沿用问题 2 / 3 交易权限",
          "$\\bar H_{t\\mid\\tau}(e;p)$：\n真值电价结算、末库存结转"),
@@ -147,10 +149,13 @@ def fig_f01():
     ax.text(6.3, 4.46, r"价值函数链：$F_t(e)$  →  $\bar H_t(e)$  →  $\bar H_{t\mid\tau}(e)$  →  $\bar H_{t\mid\tau}(e;p)$",
             ha="center", va="center", fontsize=8.7, color="#4F5E66",
             bbox=dict(boxstyle="round,pad=.22", facecolor="#F1F5EE", edgecolor="#A9B9A6", linewidth=.7))
+    # One-way progression arrows.  The Q2 -> Q3 route runs around the right
+    # edge so it cannot be mistaken for a feedback loop.
     _arrow(ax, (6.12, 6.48), (6.48, 6.48), color="#829B83", lw=1.2)
-    _arrow(ax, (9.35, 4.78), (9.35, 4.35), color="#829B83", lw=1.2)
+    route = [(12.15, 6.48), (12.38, 6.48), (12.38, 2.58), (12.15, 2.58)]
+    ax.plot(*zip(*route), color="#829B83", lw=1.2)
+    _arrow(ax, (12.15, 2.58), (12.02, 2.58), color="#829B83", lw=1.2)
     _arrow(ax, (6.48, 2.58), (6.12, 2.58), color="#829B83", lw=1.2)
-    _arrow(ax, (3.25, 4.35), (3.25, 4.78), color="#829B83", lw=1.2)
     return save(fig, "fig_f01_framework")
 
 

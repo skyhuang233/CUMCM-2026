@@ -1,0 +1,107 @@
+\begin{table}[H]\centering
+\caption{问 2指定时段计划购电量（kWh，48h 主方法）}\label{tab:q2-purchase}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 时段 & 03-20 & 06-21 & 09-23 & 12-21 \\
+\midrule
+10:00--10:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+12:00--12:10 & 442.06 & 0.00 & 332.53 & 875.22 \\
+14:00--14:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+16:00--16:10 & 480.48 & 117.92 & 564.95 & 861.68 \\
+18:00--18:10 & 658.08 & 353.55 & 721.61 & 681.63 \\
+20:00--20:10 & 0.00 & 0.00 & 53.69 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 2全天购电与费用}\label{tab:q2-cost}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 计划购电 & 紧急购电 & 合计购电 & 计划费 & 紧急费 & 总费用 \\
+\midrule
+03-20 & 59036.55 & 1260.45 & 60297.00 & 37029.99 & 6586.61 & 43616.60 \\
+06-21 & 39461.83 & 156.48 & 39618.31 & 22318.80 & 625.48 & 22944.28 \\
+09-23 & 66361.21 & 0.00 & 66361.21 & 42715.51 & 0.00 & 42715.51 \\
+12-21 & 96407.68 & 0.00 & 96407.68 & 62664.80 & 0.00 & 62664.80 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 电量单位为 kWh，费用单位为元；合计购电为计划与紧急购电之和。}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 2指定日紧急购电事件}\label{tab:q2-events}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 连续事件区间 & 电量（kWh） \\
+\midrule
+03-20 & 14:40--15:00 & 130.55 \\
+ & 15:10--17:20 & 569.04 \\
+ & 17:50--18:50 & 198.23 \\
+ & 20:10--20:50 & 321.35 \\
+ & 21:20--21:40 & 41.28 \\
+06-21 & 5:40--5:50 & 11.39 \\
+ & 6:50--7:20 & 145.09 \\
+09-23 & 无紧急购电 & 0.00 \\
+12-21 & 无紧急购电 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 2指定日充放电与首末库存（kWh）}\label{tab:q2-storage}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{03-20}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 906.77 & 135.81 & 12:00--16:00 & 4393.05 & 128.36 \\
+04:00--08:00 & 992.84 & 5286.35 & 16:00--20:00 & 63.99 & 5304.87 \\
+08:00--12:00 & 5055.23 & 2777.38 & 20:00--24:00 & 2992.97 & 2684.05 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 8999.03 & \multicolumn{2}{l}{24:00 储电量} & 3833.60 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{06-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 77.92 & 604.80 & 12:00--16:00 & 0.00 & 0.00 \\
+04:00--08:00 & 1117.43 & 1790.50 & 16:00--20:00 & 4.20 & 4931.02 \\
+08:00--12:00 & 10322.21 & 0.00 & 20:00--24:00 & 7410.01 & 2521.67 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 3095.64 & \multicolumn{2}{l}{24:00 储电量} & 9192.02 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{09-23}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 3219.44 & 22.70 & 12:00--16:00 & 4169.04 & 605.91 \\
+04:00--08:00 & 1342.80 & 4553.29 & 16:00--20:00 & 135.82 & 5748.32 \\
+08:00--12:00 & 3717.29 & 1896.62 & 20:00--24:00 & 5645.78 & 2479.17 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 6918.73 & \multicolumn{2}{l}{24:00 储电量} & 6319.21 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{12-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 1745.24 & 97.99 & 12:00--16:00 & 6511.04 & 2391.08 \\
+04:00--08:00 & 1657.03 & 1547.35 & 16:00--20:00 & 12.15 & 5389.74 \\
+08:00--12:00 & 5121.14 & 6300.22 & 20:00--24:00 & 8385.19 & 2856.67 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 8754.14 & \multicolumn{2}{l}{24:00 储电量} & 9194.93 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 指定日初值取自全年连续运行的前一日末库存。}
+\end{table}

@@ -1,0 +1,110 @@
+\begin{table}[H]\centering
+\caption{问 4-2指定时段计划购电量（kWh，48h 主方法）}\label{tab:q4-2-purchase}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 时段 & 03-20 & 06-21 & 09-23 & 12-21 \\
+\midrule
+10:00--10:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+12:00--12:10 & 442.06 & 0.00 & 481.16 & 875.22 \\
+14:00--14:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+16:00--16:10 & 480.48 & 117.92 & 560.42 & 861.68 \\
+18:00--18:10 & 0.00 & 430.90 & 0.00 & 704.85 \\
+20:00--20:10 & 679.40 & 0.00 & 53.69 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-2全天购电与费用}\label{tab:q4-2-cost}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 计划购电 & 紧急购电 & 合计购电 & 计划费 & 紧急费 & 总费用 \\
+\midrule
+03-20 & 60215.61 & 1150.22 & 61365.83 & 38610.77 & 6102.56 & 44713.33 \\
+06-21 & 41171.97 & 156.21 & 41328.18 & 20355.42 & 424.91 & 20780.33 \\
+09-23 & 66856.50 & 0.00 & 66856.50 & 44656.71 & 0.00 & 44656.71 \\
+12-21 & 95725.74 & 0.00 & 95725.74 & 73248.40 & 0.00 & 73248.40 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 电量单位为 kWh，费用单位为元；合计购电为计划与紧急购电之和。}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-2指定日紧急购电事件}\label{tab:q4-2-events}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 连续事件区间 & 电量（kWh） \\
+\midrule
+03-20 & 14:50--15:00 & 4.19 \\
+ & 15:20--17:30 & 589.61 \\
+ & 17:50--18:00 & 45.08 \\
+ & 19:10--19:20 & 219.95 \\
+ & 19:30--20:20 & 229.03 \\
+ & 20:30--20:50 & 13.92 \\
+ & 21:20--21:40 & 48.45 \\
+06-21 & 5:40--5:50 & 42.25 \\
+ & 6:30--6:50 & 42.83 \\
+ & 7:00--7:20 & 71.13 \\
+09-23 & 无紧急购电 & 0.00 \\
+12-21 & 无紧急购电 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-2指定日充放电与首末库存（kWh）}\label{tab:q4-2-storage}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{03-20}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 4047.45 & 21.38 & 12:00--16:00 & 4465.71 & 254.72 \\
+04:00--08:00 & 1622.53 & 5747.20 & 16:00--20:00 & 46.69 & 6508.51 \\
+08:00--12:00 & 5157.62 & 2777.38 & 20:00--24:00 & 693.23 & 1567.16 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 6014.42 & \multicolumn{2}{l}{24:00 储电量} & 1692.82 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{06-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 58.49 & 684.77 & 12:00--16:00 & 0.00 & 0.00 \\
+04:00--08:00 & 1192.85 & 1614.21 & 16:00--20:00 & 13.94 & 5011.38 \\
+08:00--12:00 & 10322.21 & 0.00 & 20:00--24:00 & 8961.12 & 2532.70 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 2938.23 & \multicolumn{2}{l}{24:00 储电量} & 10495.24 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{09-23}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 3047.03 & 0.00 & 12:00--16:00 & 4405.80 & 608.62 \\
+04:00--08:00 & 2068.72 & 5321.82 & 16:00--20:00 & 100.88 & 6465.19 \\
+08:00--12:00 & 3958.31 & 1896.62 & 20:00--24:00 & 5566.95 & 1728.27 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 6798.08 & \multicolumn{2}{l}{24:00 储电量} & 6230.43 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{12-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 469.46 & 143.20 & 12:00--16:00 & 6905.07 & 2477.42 \\
+04:00--08:00 & 153.24 & 774.22 & 16:00--20:00 & 11.42 & 5245.59 \\
+08:00--12:00 & 4884.57 & 6341.42 & 20:00--24:00 & 9525.53 & 2856.67 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 10446.97 & \multicolumn{2}{l}{24:00 储电量} & 10380.74 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 指定日初值取自全年连续运行的前一日末库存。}
+\end{table}

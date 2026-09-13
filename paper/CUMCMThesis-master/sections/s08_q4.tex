@@ -5,9 +5,9 @@
 \subsection{电价预测层：日水平 $\times$ 日内形状}
 电价预测文献\cite{weron}表明日内形状远比日间水平易于预测。电价与净负荷（负载减光伏）同受供需驱动，采用与负载预测同构的分解结构。对此前 $K_p=35$ 个完整日计算日价格水平 $\ell_i=T^{-1}\sum_tp_{i,t}$ 与平均归一化日内形状 $\chi_{d,t}$，两支分别建立水平模型：
 
-\textbf{4-2 支（净负荷回归）}：价格水平由前一日水平与当日净负荷预测回归，
+\textbf{4-2 支（净负荷回归）}：价格水平由当日净负荷预测回归，
 \begin{equation}
-\hat\ell_{d\mid\tau}=a+\rho\,\ell_{d-1}+b\,\widehat N_{d\mid\tau}/10^5,\qquad
+\hat\ell_{d\mid\tau}=a+b\,\widehat N_{d\mid\tau}/10^5,\qquad
 \hat p_{d,t\mid\tau}=\hat\ell_{d\mid\tau}\,\chi_{d,t},
 \label{eq:q4price}
 \end{equation}
@@ -15,12 +15,11 @@
 
 价格残差与负载、光伏残差按\textbf{同一历史发布时刻的完整路径}三通道配对（式\eqref{eq:q2scenario} 增加价格通道），保持“高负载日往往高电价”的跨通道相关。优化目标中：调整与普通购电费用（跨场景共享的第一阶段变量）按场景均价计费，各场景的紧急购电与跨午夜暂拟购电按该场景自身价格计费，实际结算始终使用附件 4 真值。
 
-图~\ref{fig:fig_f10_price_forecast} 给出预测质量的两端：3 月 20 日（MAE 0.030 元/kWh）形状与水平俱佳；12 月 21 日（MAE 0.191 元/kWh）遭遇价格水平跳升，回归无法预见。全年逐日 MAE 的这种右偏分布正是问题 4 相对完美价格信息的费用差来源。
+图~\ref{fig:fig_f10_price_forecast} 使用两支各自的正式预测器，比较 3 月 20 日与 12 月 21 日的 0:00 预测。4-2 两日 MAE 分别为 0.033、0.041 元/kWh，4-3 为 0.037、0.131 元/kWh。4-2 的历史回归特征按当时可得的净负荷预测重建；两日对照用于展示误差的日期与分支差异，不据此推断全年误差分布。
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.92\textwidth]{fig_f10_price_forecast}
-\caption{电价 0:00 预测与真值：左为 3 月 20 日（MAE 0.030 元/kWh，形状水平俱准），右为 12 月 21 日（MAE 0.191 元/kWh，水平跳升不可预见）——诚实展示预测的两端}
-\label{fig:fig_f10_price_forecast}
+\safeincludegraphics[width=0.96\textwidth]{fig_f10_price_forecast}
+\caption{两分支电价预测与真值（0:00 发布，MAE 单位：元/kWh）}\label{fig:fig_f10_price_forecast}
 \end{figure}
 
 \subsection{两支的优化模型与权限差异}
@@ -44,12 +43,24 @@ $\bar p_t$ 为场景均价，$v_\tau$ 为价格场景次日 0--5 时均价除以
 
 \textbf{其一，价格预测误差的代价意外地小}。同口径比较，4-2 基线与其完美价格参照差 8.88 万元（0.62\%），4-3 基线差 9.36 万元（0.68\%）。原因在结构上：采购与执行依赖的是价格的\emph{相对形状}（何时便宜何时贵），而日内形状 $\chi_{d,t}$ 高度稳定、易于预测；难以预测的是日间水平跳动，而命题~\ref{prop:scale} 恰说明水平误差对决策形状几乎无影响，只影响对少数极端日的调整幅度。
 
-\textbf{其二，4-3 相对 4-2 的 53.69 万元差距与问题 3 相对问题 2 的 54.01 万元几乎一致}。两个差距都主要来自“正式预报 + 日内调整权限”这一组合，说明该组合的价值对电价环境稳健；波动电价没有放大也没有侵蚀调整权限的价值。逐月看（图~\ref{fig:fig_f11_q4_monthly}），4-3 的优势集中在光伏波动大的月份，2 月甚至出现小幅负值——当月负载水平低、调整机会少，而 4-3 的 AR(1) 价格模型在当月水平跳变日恰好方向出错；诚实呈现该负值月份正说明差距的来源是信息而非口径。
+\textbf{其二，4-2 与 4-3 的全年账单差为 53.69 万元}，与问题 2、3 的 54.01 万元差距接近。图~\ref{fig:fig_f11_q4_monthly} 上图分别比较 4-2 与问 2、4-3 与问 3；下图直接给出 4-2 减 4-3 的月度账单差。两个比较使用相同的 48h 配置，但价格环境、预测规则、光伏信息与交易权限并非都相同，因此不能将账单差单独归因于某项权限或预测方法。
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.92\textwidth]{fig_f11_q4_monthly}
-\caption{问题四两支相对各自常数电价对应问（4-2 对问 2、4-3 对问 3）的逐月费用差：波动电价整体抬升费用约 5\%，抬升幅度冬季最大；4-3 对 4-2 的月度优势与问 3 对问 2 的模式一致}
-\label{fig:fig_f11_q4_monthly}
+\safeincludegraphics[width=0.96\textwidth]{fig_f11_q4_monthly}
+\caption{问题四月度费用对照（差值方向见图例，48h 主方法）}\label{fig:fig_f11_q4_monthly}
 \end{figure}
 
 四个分支处于不同的信息与交易环境，总费用只在各自环境内评价；4-2 与 4-3 之间同时改变了预测规则、可得光伏信息与采购权限，其差额是组合价值，本文不对其做单因素归因。完整策略已存入 result4-2.xlsx 与 result4-3.xlsx。
+
+\FloatBarrier
+\subsubsection{4-2 指定日结果}
+\input{generated/q4_2_report_tables.tex}
+\FloatBarrier
+\subsubsection{4-3 指定日结果}
+\input{generated/q4_3_report_tables.tex}
+\FloatBarrier
+
+\begin{figure}[!htbp]\centering
+\safeincludegraphics[width=0.96\textwidth]{fig_f17_q4_soc}
+\caption{问题四两分支指定日库存轨迹（48h 主方法）}\label{fig:fig_f17_q4_soc}
+\end{figure}

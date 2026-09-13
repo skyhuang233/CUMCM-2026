@@ -47,13 +47,16 @@ uv pip install -e .
 .venv/bin/python -m pytest
 ```
 
-### 生成论文插图
+### 生成论文图表
 
 ```bash
-.venv/bin/python -m src.make_figures   # PDF 输出到 plot/
+.venv/bin/python -m src.paper_aux priceday  # 按正式预测器重放两分支的价格对照
+MPLCONFIGDIR=/tmp/cumcm-mpl .venv/bin/python -m src.make_figures
+.venv/bin/python -m src.make_tables
+/opt/homebrew/bin/tectonic -X compile --keep-logs paper/CUMCMThesis-master/paper.tex
 ```
 
-图表脚本只读已保存的实验，不再隐式重跑模型。同步生成 `paper/CUMCMThesis-master/generated/` 下的正文表格与数值宏，缺失项写入 `plot/m30-data-status.json`。
+图形与表格只读 `results/latest/m30/` 的冻结实验，不重跑采购或执行模型。17 张矢量图输出到 `plot/`，当前论文使用的清单见 `plot/paper_figures.json`；按问分组的结果表、年度汇总和组件比较表输出到 `paper/CUMCMThesis-master/generated/`。主方法运行图与指定日表读取对应 48h 结果；预报时刻与组件比较明确使用 24h 基线。价格辅助数据按两个正式分支分别重放，其中 4-2 绑定历史时点因果净负荷特征。
 
 ### 保存完整精度实验
 

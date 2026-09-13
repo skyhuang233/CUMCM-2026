@@ -223,29 +223,41 @@ def run_priceday(targets: list[date]) -> None:
     daily = load_attachment2()
     p4_dates, p4 = load_attachment4()
     forecaster = PointForecaster(daily, att1, reference_baseline=True)
-    ps = PriceForecaster(p4_dates, p4, att1, k=K_PRICE, branch="q4_2")
+    daily_row = {d: i for i, d in enumerate(daily.dates)}
 
-    def net(d: date) -> float:
+    def net(d: date, segment: int = 0) -> float:
+        # Match run_q2.run_period's historical causal feature reconstruction.
         lh, vh = forecaster.predict(d)
+        if segment and d in daily_row:
+            i = daily_row[d]
+            return float(np.sum(daily.load_kwh[i, :segment] - daily.pv_kwh[i, :segment])
+                         + np.sum(lh[segment:] - vh[segment:]))
         return float(np.sum(lh - vh))
 
-    out = {}
+    branches = {}
     row4 = {d: i for i, d in enumerate(p4_dates)}
-    for d in targets:
-        today_p, _ = ps.predict(d, 0, net_load_pred=net(d), net_load_next=net(d + timedelta(days=1)))
-        truth = p4[row4[d]]
-        out[d.isoformat()] = {
-            "pred": np.asarray(today_p, float).tolist(),
-            "truth": truth.tolist(),
-            "mae": float(np.mean(np.abs(np.asarray(today_p) - truth))),
-        }
+    for branch in ("q4_2", "q4_3"):
+        ps = PriceForecaster(p4_dates, p4, att1, k=K_PRICE, branch=branch, net_load=net)
+        out = {}
+        for d in targets:
+            next_l, next_v = forecaster.predict_next(d)
+            today_p, _ = ps.predict(d, 0, net_load_pred=net(d),
+                                    net_load_next=float(np.sum(next_l - next_v)))
+            truth = p4[row4[d]]
+            out[d.isoformat()] = {
+                "pred": np.asarray(today_p, float).tolist(),
+                "truth": truth.tolist(),
+                "mae": float(np.mean(np.abs(np.asarray(today_p) - truth))),
+            }
+        branches[branch] = out
     _write_json("price_forecast_days.json", {
-        "说明": "问 4 电价预测（0:00 发布，K_p=35 基线管线）与附件 4 真值对照，含逐日 MAE。",
-        "days": out,
+        "说明": "问 4 两分支正式预测器（0:00 发布，K_p=35）与附件 4 真值；4-2 使用历史时点因果净负荷特征。",
+        "branches": branches,
         "fingerprint": _fingerprint(),
     })
-    for d, v in out.items():
-        print(f"  {d} 电价 MAE = {v['mae']:.4f} 元/kWh")
+    for branch, out in branches.items():
+        for d, v in out.items():
+            print(f"  {branch} {d} 电价 MAE = {v['mae']:.4f} 元/kWh")
 
 
 def _write_readme() -> None:

@@ -1,12 +1,14 @@
-\begin{table}[!htbp]
-\centering\small
-\caption{问3发布时刻组合与相邻组合的费用变化}\label{tab:issues}
-\begin{tabular}{|l|r|r|r|}
-\hline
-\tabheadrow 发布时刻/h & 总费用/元 & 紧急费/元 & 相邻节省/元 \\ \hline
-0 & 13351182.68 & 579245.64 & --- \\ \hline
-0,6 & 13312853.41 & 353878.30 & 38329.27 \\ \hline
-0,6,12 & 13075459.34 & 265785.37 & 237394.07 \\ \hline
-0,6,12,18 & 13024596.85 & 192075.49 & 50862.49 \\ \hline
-\end{tabular}
+\begin{table}[H]\centering
+\caption{预报时刻组合的费用与相邻节省（元，24h 基线）}\label{tab:issues}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 预报时刻 & 总费用 & 紧急费用 & 相邻节省 \\
+\midrule
+0 & 13351182.68 & 579245.64 & --- \\
+0/6 & 13312853.41 & 353878.30 & 38329.27 \\
+0/6/12 & 13075459.34 & 265785.37 & 237394.07 \\
+0/6/12/18 & 13024596.85 & 192075.49 & 50862.49 \\
+\bottomrule
+\end{tabularx}
 \end{table}

@@ -14,13 +14,9 @@ C_{\mathrm{real}}=\sum_{d}\sum_{t}\bigl(p_tG^0_{d,t}+5p_tE_{d,t}\bigr).
 \hat B_d&=B_{d-1}\exp\bigl[\beta_d(k_d-k_{d-1})\bigr],\qquad
 \hat L_{d,t}=\hat B_d\,\hat s_{d,t}. &&\text{（水平递推 $\times$ 形状）}\label{eq:q2load}
 \end{align}
-预测次日时，水平递推使用当日的\emph{预测}日电量而非尚未结束的真实总量。1 月 15 日前采用当时可得的同星期均值，样本不足回退至最近至多七日均值。光伏点预测取此前最多三个完整日的逐段均值（光伏功率预测的系统综述见文献\cite{antonanzas}；本题的正式数值预报在问题 3 才可用）。图~\ref{fig:fig_f04_load_forecast} 给出 3 月 20 日的预测效果：形状复现准确，残差集中在光伏午间波动段——这正是场景层要刻画的不确定性。
+预测次日时，水平递推使用当日的\emph{预测}日电量而非尚未结束的真实总量。1 月 15 日前采用当时可得的同星期均值，样本不足回退至最近至多七日均值。光伏点预测取此前最多三个完整日的逐段均值（光伏功率预测的系统综述见文献\cite{antonanzas}；本题的正式数值预报在问题 3 才可用）。图~\ref{fig:fig_f04_load_forecast} 将 3 月 20 日负载、光伏的点预测与真值并列展示，下图给出净负荷场景，说明两类预测误差如何进入采购模型。
 
-\begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.9\textwidth]{fig_f04_load_forecast}
-\caption{3 月 20 日 0:00 负载预测与实际（上）及残差（下）：分解式预测复现日内双峰形状，残差无系统偏倚}
-\label{fig:fig_f04_load_forecast}
-\end{figure}
+
 
 \subsection{场景层：完整路径配对残差}\label{sec:q2scen}
 预测误差不是逐段独立噪声——负载误差日内强相关，光伏误差与天气过程绑定，两通道之间也相关。因此场景不做参数化假设，而直接使用\textbf{完整路径残差}：每条历史 0:00 发布预测在其 24 小时全部交付后，与实际曲线相减得到一条负载残差与一条光伏残差，二者来自同一历史日、保持配对。决策日 0:00 选取此前最近 $M=30$ 条完整配对残差，等权叠加到当天点预测（负值截零），得到场景集
@@ -29,12 +25,11 @@ L_{\omega,t}=\bigl[\hat L_{d,t}+r^{L}_{\omega,t}\bigr]^+,\qquad
 V_{\omega,t}=\bigl[\hat V_{d,t}+r^{V}_{\omega,t}\bigr]^+,\qquad \omega=1,\dots,M.
 \label{eq:q2scenario}
 \end{equation}
-历史残差必须由“历史当时可得信息”生成的预测计算（一月起因果重建），未完成的路径不入库。图~\ref{fig:fig_f05_scenario_fan} 显示 30 条净负荷场景对真值的覆盖：场景带在光伏时段最宽，与不确定性来源一致。
+历史残差必须由“历史当时可得信息”生成的预测计算（一月起因果重建），未完成的路径不入库。图~\ref{fig:fig_f04_load_forecast} 下图展示 30 条净负荷场景及其经验分位带。分位带描述所选场景的分布范围，不是保证覆盖真值的置信区间。
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.9\textwidth]{fig_f05_scenario_fan}
-\caption{3 月 20 日净负荷（负载减光伏）的 30 条配对场景与真值：场景带覆盖真值路径，午间光伏波动段最宽}
-\label{fig:fig_f05_scenario_fan}
+\safeincludegraphics[width=0.96\textwidth]{fig_f04_load_forecast}
+\caption{3 月 20 日预测与净负荷场景（0:00 发布）}\label{fig:fig_f04_load_forecast}
 \end{figure}
 
 \subsection{采购层：样本平均近似与 48 小时主方法}\label{sec:q2saa}
@@ -63,6 +58,7 @@ H_{u,\omega}(e)=\min_{x}\bigl\{\phi_{u,\omega}(x)+H_{u+1,\omega}(e+x)\bigr\},\qq
 \label{eq:q2hbar}
 \end{equation}
 其中当天固定采购段记净缺口 $r=L_{\omega,u}-V_{\omega,u}-G^0_u$，单段费用 $\phi_{u,\omega}(x)=5p_u[r+\psi(x)]^+$（缺口只能放电或 5 倍电价补购，富余只允许充电）；跨午夜自由采购段 $\phi_{u,\omega}(x)=p_u[L-V+\psi(x)]^+$；末端接 $V(e)$（主方法）或 $-ve$（基线）。由命题~\ref{prop:convex} 的同一论证，每个 $H_{u,\omega}$ 与 $\bar H_u$ 均为凸折线，可精确表示与平均。
+\input{propositions-p2}
 
 \textbf{因果执行规则（DP 价值执行器）}按下述步骤逐段进行。
 
@@ -81,12 +77,11 @@ R_t=\max\operatorname*{arg\,min}_{1200\le z\le10800}\bigl\{5p_t\eta z+\bar H_{t+
 
 \textbf{Step 5}（结转）：$S_t=S_{t-1}+\eta C_t-D_t/\eta$，富余 $W_t$ 由平衡式回填；进入下一段。
 
-该规则只使用当段已观测量与 0:00 已构造的 $\bar H$，天然互斥充放电，且紧急购电从不用于充电（假设 5）。图~\ref{fig:fig_f06_dp_mechanism} 展示执行机理：保留水平随时段起伏——未来有高价缺口时抬高（惜放），临近日末且次日凌晨便宜时压低（敢放）；SOC 轨迹在 $R_t$ 之上时缺口全由放电覆盖，触及 $R_t$ 后转为紧急购电。
+该规则只使用当段已观测量与 0:00 已构造的 $\bar H$，天然互斥充放电，且紧急购电从不用于充电（假设 5）。图~\ref{fig:fig_f06_dp_mechanism} 展示执行机理：保留水平随时段起伏——未来有高价缺口时抬高（惜放），临近日末且次日凌晨便宜时压低（敢放）；可用放电量同时受库存保留水平和功率上限约束，因此存在库存时仍可能发生紧急购电。图中执行轨迹来自 48h 主方法，日初库存承接前一日末值。
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.92\textwidth]{fig_f06_dp_mechanism}
-\caption{DP 价值执行器机理（3 月 20 日）：上图为动态保留水平 $R_t$ 与储电量轨迹及紧急购电段；下图为三个时刻的 $\bar H_t(e)$ 折线——保留水平即“边际价值 = 当段紧急代价”的平衡点}
-\label{fig:fig_f06_dp_mechanism}
+\safeincludegraphics[width=0.96\textwidth]{fig_f06_dp_mechanism}
+\caption{问题二库存保留与紧急购电（3 月 20 日，48h 主方法）}\label{fig:fig_f06_dp_mechanism}
 \end{figure}
 
 \subsection{候选计划重评}
@@ -95,12 +90,21 @@ SAA 解 $G^s$ 优化的是完美追索代理，与因果执行之间存在口径
 \subsection{结果与解读}
 主方法（48h+$V(e)$）全年（2 月 1 日--12 月 31 日，334 个评分日）实际费用 \textbf{1352.96 万元}，其中紧急购电费 78.23 万元（购电量占比 0.69\%）；24 小时基线为 1356.64 万元，时域与终端定价组件全年净省 3.68 万元。定位区间：完美信息离线下界（全年真值一次 LP、无紧急与调整费）为 1222.82 万元，无储能直购（已知真值按需购电）为 1640.73 万元，与主方法同一预测下无储能定购为 1879.64 万元。主方法费用位于下界之上 10.6\%、比同信息无储能方案节省 28.0\%——差距的主要来源是信息不完整（预测残差引发的紧急购电与保守购电），而非执行规则本身。
 
-\input{generated/baseline_tables.tex}
+
+
+
+
+月度分解（图~\ref{fig:fig_f07_q2_monthly}）显示费用的季节结构：12 月最贵（165.68 万元，冬季负载高、光伏出力弱），6--7 月为次高峰（137.65 与 144.79 万元，空调负载抬升日电量），4--5 月最便宜（94.99--97.76 万元，光伏强而负载温和）。四个指定日结果集中列于下表，六个指定十分钟时段、四小时充放电量及紧急事件均保留在正文。
+
+\input{generated/q2_report_tables.tex}
+\FloatBarrier
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.92\textwidth]{fig_f07_q2_monthly}
-\caption{问题二主方法月度费用与参照带：12 月最高（冬季负载高、光伏弱），6--7 月次之（空调负载），4--5 月春季最低；全年每月都稳定落在“下界—无储能”区间内侧}
-\label{fig:fig_f07_q2_monthly}
+\safeincludegraphics[width=0.96\textwidth]{fig_f15_q2_soc}
+\caption{问题二四个指定日的库存轨迹（48h 主方法）}\label{fig:fig_f15_q2_soc}
 \end{figure}
 
-月度分解（图~\ref{fig:fig_f07_q2_monthly}）显示费用的季节结构：12 月最贵（165.68 万元，冬季负载高、光伏出力弱），6--7 月为次高峰（137.65 与 144.79 万元，空调负载抬升日电量），4--5 月最便宜（94.99--97.76 万元，光伏强而负载温和）。指定日期结果见 \S\ref{sec:reportdays} 统一给出。
+\begin{figure}[!htbp]\centering
+\safeincludegraphics[width=0.96\textwidth]{fig_f07_q2_monthly}
+\caption{问题二月度费用分解（48h 主方法）}\label{fig:fig_f07_q2_monthly}
+\end{figure}

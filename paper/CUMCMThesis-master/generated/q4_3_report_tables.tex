@@ -1,0 +1,139 @@
+\begin{table}[H]\centering
+\caption{问 4-3指定时段原计划购电量（kWh，48h 主方法）}\label{tab:q4-3-plan}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 时段 & 03-20 & 06-21 & 09-23 & 12-21 \\
+\midrule
+10:00--10:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+12:00--12:10 & 539.72 & 0.00 & 380.87 & 909.40 \\
+14:00--14:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+16:00--16:10 & 536.49 & 156.52 & 600.27 & 843.68 \\
+18:00--18:10 & 0.00 & 385.88 & 0.00 & 703.54 \\
+20:00--20:10 & 679.40 & 0.00 & 53.69 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-3指定时段最终提交购电量（kWh，48h 主方法）}\label{tab:q4-3-purchase}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 时段 & 03-20 & 06-21 & 09-23 & 12-21 \\
+\midrule
+10:00--10:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+12:00--12:10 & 539.72 & 0.00 & 0.00 & 914.70 \\
+14:00--14:10 & 0.00 & 0.00 & 0.00 & 0.00 \\
+16:00--16:10 & 536.49 & 131.61 & 596.17 & 879.04 \\
+18:00--18:10 & 0.00 & 385.88 & 0.00 & 670.78 \\
+20:00--20:10 & 679.40 & 0.00 & 53.69 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-3全天购电与调整量（kWh）}\label{tab:days-q4-3}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 原计划 & 调增 & 调减 & 最终提交 & 紧急购电 & 合计购电 \\
+\midrule
+03-20 & 62763.23 & 388.70 & 530.20 & 62621.73 & 335.55 & 62957.28 \\
+06-21 & 34042.43 & 0.00 & 37.09 & 34005.35 & 138.99 & 34144.34 \\
+09-23 & 66952.21 & 0.00 & 1220.22 & 65731.99 & 0.00 & 65731.99 \\
+12-21 & 96561.91 & 731.37 & 1429.47 & 95863.80 & 0.00 & 95863.80 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-3全天费用分解（元）}\label{tab:q4-3-cost}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRRRRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 计划费 & 减购违约费 & 增购费 & 紧急费 & 总费用 \\
+\midrule
+03-20 & 39587.61 & 144.51 & 455.39 & 1757.16 & 41944.66 \\
+06-21 & 17493.33 & 11.00 & 0.00 & 401.52 & 17905.85 \\
+09-23 & 44435.02 & 320.84 & 0.00 & 0.00 & 44755.87 \\
+12-21 & 71667.62 & 823.03 & 977.86 & 0.00 & 73468.51 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 计划费按 $p\min(G^0,G^a)$ 结算；总费用为四项之和。}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-3指定日紧急购电事件}\label{tab:q4-3-events}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}LRR@{}}
+\toprule
+\rowcolor{cumcmgray} 日期 & 连续事件区间 & 电量（kWh） \\
+\midrule
+03-20 & 9:20--10:00 & 141.59 \\
+ & 15:50--16:20 & 45.01 \\
+ & 16:40--16:50 & 17.19 \\
+ & 20:20--20:50 & 83.31 \\
+ & 21:20--21:40 & 48.45 \\
+06-21 & 5:40--5:50 & 12.14 \\
+ & 6:50--7:20 & 126.85 \\
+09-23 & 无紧急购电 & 0.00 \\
+12-21 & 无紧急购电 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]\centering
+\caption{问 4-3指定日充放电与首末库存（kWh）}\label{tab:q4-3-storage}
+\small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
+
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{03-20}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 3067.77 & 24.68 & 12:00--16:00 & 5659.53 & 254.72 \\
+04:00--08:00 & 986.98 & 5799.71 & 16:00--20:00 & 139.58 & 6769.80 \\
+08:00--12:00 & 4743.06 & 2635.79 & 20:00--24:00 & 3065.94 & 1561.58 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 6950.92 & \multicolumn{2}{l}{24:00 储电量} & 3907.20 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{06-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 114.04 & 648.39 & 12:00--16:00 & 0.00 & 0.00 \\
+04:00--08:00 & 1238.33 & 1618.48 & 16:00--20:00 & 8.20 & 4992.01 \\
+08:00--12:00 & 10322.21 & 0.00 & 20:00--24:00 & 1743.52 & 2540.02 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 2811.62 & \multicolumn{2}{l}{24:00 储电量} & 4007.62 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{09-23}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 3042.01 & 7.81 & 12:00--16:00 & 4945.36 & 403.62 \\
+04:00--08:00 & 2007.13 & 5674.51 & 16:00--20:00 & 21.04 & 6377.08 \\
+08:00--12:00 & 4150.69 & 1896.62 & 20:00--24:00 & 4934.96 & 1725.33 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 6938.85 & \multicolumn{2}{l}{24:00 储电量} & 6257.72 \\
+\bottomrule
+\end{tabularx}\par\vspace{5pt}
+\begin{tabularx}{\textwidth}{@{}LRRLRR@{}}
+\multicolumn{6}{@{}l}{\textbf{12-21}} \\
+\toprule
+\rowcolor{cumcmgray} 时段 & 充电量 & 放电量 & 时段 & 充电量 & 放电量 \\
+\midrule
+00:00--04:00 & 1414.10 & 83.01 & 12:00--16:00 & 7701.65 & 2521.41 \\
+04:00--08:00 & 196.83 & 880.34 & 16:00--20:00 & 11.42 & 5521.71 \\
+08:00--12:00 & 5008.85 & 7001.54 & 20:00--24:00 & 9529.39 & 2854.01 \\
+\midrule
+\multicolumn{2}{l}{0:00 储电量} & 9562.16 & \multicolumn{2}{l}{24:00 储电量} & 10080.37 \\
+\bottomrule
+\end{tabularx}
+\par\vspace{3pt}{\footnotesize 指定日初值取自全年连续运行的前一日末库存。}
+\end{table}

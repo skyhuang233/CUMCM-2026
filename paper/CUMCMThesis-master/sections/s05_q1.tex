@@ -59,12 +59,11 @@ F_{145}(e)=\begin{cases}0,&e=6000,\\ +\infty,&\text{其他},\end{cases}
 
 命题~\ref{prop:convex} 的三点含义贯穿全文：(i) $F_t$ 可以用\textbf{断点--斜率序列精确表示}，逆向递推化为凸折线的下确界卷积（斜率归并排序），全程无库存网格、无插值误差；(ii) 边际价值 $-\partial F_t(e)$ 单调非增，“库存越满、追加一度电越不值钱”，这正是储能套利的边际递减结构；(iii) 给定 $F_{t+1}$，最优动作由边际价值与当段电价的比较刻画，即“放电到保留水平为止”的阈值规则——后三问的 DP 价值执行器就是该规则在不完整信息下的直接推广。
 
-图~\ref{fig:fig_f02_value_function} 将该结构可视化：左图为四个代表时刻的 $F_t(e)$ 凸折线，右图为 12:00 的边际价值阶梯。可以看到清晨（$t=36$ 前）边际价值高——此后是早高峰放电窗口；库存越高曲线越平——富余库存的机会成本递减。
+图~\ref{fig:fig_f02_value_function} 上下对照 0:00、6:00、12:00、18:00 的价值函数与边际价值。相同时刻采用一致的线型与颜色，便于沿库存横轴核对凸折线及边际非增结构。
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.92\textwidth]{fig_f02_value_function}
-\caption{问题一价值函数 $F_t(e)$（左）与 12:00 边际价值 $-\partial F_t$（右）：凸、分段线性、边际单调，验证命题~\ref{prop:convex}}
-\label{fig:fig_f02_value_function}
+\safeincludegraphics[width=0.96\textwidth]{fig_f02_value_function}
+\caption{问题一多时刻库存价值与边际价值}\label{fig:fig_f02_value_function}
 \end{figure}
 
 \subsection{双方法互证与求解验证}
@@ -82,9 +81,14 @@ F_{145}(e)=\begin{cases}0,&e=6000,\\ +\infty,&\text{其他},\end{cases}
 \input{generated/q1_tables.tex}
 
 \begin{figure}[!htbp]\centering
-\safeincludegraphics[width=0.9\textwidth]{fig_f03_q1_day}
-\caption{问题一最优调度：(a) 负载、光伏与计划购电功率；(b) 储电量轨迹。低价谷段（0--6 时、12--14 时）满功率充电、购电顶到负载之上，高价峰段（7--11 时、17--20 时）放电、购电归零}
-\label{fig:fig_f03_q1_day}
+\safeincludegraphics[width=0.96\textwidth]{fig_f03_q1_day}
+\caption{问题一购电功率与分时电价}\label{fig:fig_f03_q1_day}
 \end{figure}
 
-图~\ref{fig:fig_f03_q1_day} 显示最优策略的经济机理：购电集中在电价谷段并同步充电，峰段完全依靠光伏与放电覆盖负载；储电量在两个峰前充至接近上限、峰内放至接近下限，一天完成约两个完整充放循环——在效率损耗 $\eta^2=0.81$ 下，只有峰谷价差超过约 $1/0.81-1\approx23\%$ 的时段对才值得套利，这解释了为何部分中等价差时段储能保持静默。周期约束的对偶价格给出 24:00 库存的边际影子价，与次日 0:00 的 $F$ 曲线斜率一致，说明周期解自洽。
+
+\begin{figure}[!htbp]\centering
+\safeincludegraphics[width=0.96\textwidth]{fig_f14_q1_storage}
+\caption{问题一充放电功率与库存轨迹}\label{fig:fig_f14_q1_storage}
+\end{figure}
+
+图~\ref{fig:fig_f03_q1_day} 与图~\ref{fig:fig_f14_q1_storage} 显示最优策略的经济机理：购电集中在电价谷段并同步充电，部分高价时段依靠光伏与放电覆盖负载、购电降至零；储电量在两个峰前充至接近上限、峰内放至接近下限，一天完成约两个完整充放循环——在效率损耗 $\eta^2=0.81$ 下，只有峰谷价差超过约 $1/0.81-1\approx23\%$ 的时段对才值得套利，这解释了为何部分中等价差时段储能保持静默。周期约束的对偶价格给出 24:00 库存的边际影子价，与次日 0:00 的 $F$ 曲线斜率一致，说明周期解自洽。

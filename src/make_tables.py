@@ -123,12 +123,12 @@ def build_days(branch, name):
 
 
 def build_annual():
-    head=['分支','24h 总费','48h 总费','节省额','48h 紧急费','48h 紧急量','48h 末库存']
+    head=['分支','24h 总费','48h 总费','节省额','48h 紧急费']
     rows=[]
     for b,n in zip(BRANCHES,NAMES):
         base=summary(b+'_baseline');main=summary(b+'_48h')
-        rows.append([n]+[num(v/1e4) for v in [base['total_cost'],main['total_cost'],base['total_cost']-main['total_cost'],main['emergency_cost']]]+[num(main['emergency_kwh']),num(main['soc_end'])])
-    text=table('四分支年度账单与库存汇总（334 个评分日）','tab:main-results',head,rows,note='费用单位为万元，电量与库存单位为 kWh；节省额为 24h 总费减 48h 总费。')
+        rows.append([n]+[num(v/1e4) for v in [base['total_cost'],main['total_cost'],base['total_cost']-main['total_cost'],main['emergency_cost']]])
+    text=table('四分支综合性能比较（万元，334 个评分日）','tab:main-results',head,rows,note='24h 为单日时域配置，48h 为跨日前瞻配置；节省额为两者总费之差。')
     write_table('annual_table.tex', text)
 
 

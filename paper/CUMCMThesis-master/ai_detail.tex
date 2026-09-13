@@ -1,0 +1,55 @@
+\PassOptionsToPackage{fontset=none}{ctex}
+\documentclass[a4paper,12pt]{ctexart}
+\setCJKmainfont[Path=/System/Library/Fonts/Supplemental/,FontIndex=6,BoldFont=Songti.ttc,BoldFeatures={FontIndex=1}]{Songti.ttc}
+\setCJKsansfont[Path=/System/Library/Fonts/,FontIndex=1]{STHeiti Medium.ttc}
+\setCJKmonofont[Path=/System/Library/Fonts/,FontIndex=1]{STHeiti Light.ttc}
+\usepackage[top=2.5cm,bottom=2.5cm,left=2.8cm,right=2.8cm]{geometry}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=2em}
+\pagestyle{plain}
+\begin{document}
+
+\begin{center}
+{\Large\bfseries AI 工具使用详情}
+\end{center}
+
+\bigskip
+
+\section{所用 AI 工具名称、版本}
+
+\begin{itemize}
+\item \textbf{工具名称：}Claude Code（Anthropic 公司出品的 AI 编程助手）
+\item \textbf{模型版本：}Claude Opus 4
+\item \textbf{使用方式：}通过 Claude Code CLI（命令行界面）在本地终端中以自然语言对话方式交互
+\end{itemize}
+
+\section{具体使用目的和环节}
+
+\begin{enumerate}
+\item \textbf{代码开发辅助：}在参赛队完成算法设计后，使用 AI 工具辅助编写 Python 代码，包括优化器（线性规划与样本平均近似）、DP 价值执行器、负载/光伏/电价预测模块、场景生成、结算模块等。
+\item \textbf{数据分析与可视化辅助：}辅助编写结果验证脚本、灵敏度分析脚本、全年 walk-forward 回测框架，以及论文中图表的绘制脚本。
+\item \textbf{论文语言润色：}辅助 LaTeX 论文排版与文字润色。
+\end{enumerate}
+
+\section{主要提示方式与使用过程说明}
+
+使用过程中，参赛队通过 Claude Code CLI 以自然语言描述建模需求和算法思路，由 AI 工具辅助将设计转化为代码实现。典型交互过程如下：
+
+\begin{enumerate}
+\item 参赛队提出具体的算法设计或功能需求（如"实现带周期库存约束的确定性 LP""构造 30 条配对残差场景"）；
+\item AI 工具根据描述生成代码草稿；
+\item 参赛队审查代码逻辑，指出需要修改的部分；
+\item 反复迭代直至代码满足设计要求并通过测试。
+\end{enumerate}
+
+\section{对 AI 输出的采纳、人工修改和核验情况}
+
+\begin{enumerate}
+\item \textbf{核心建模决策由参赛队独立完成：}包括线性规划模型的构造与约束设计、样本平均近似的场景生成方案、DP 价值函数的定义与性质证明、滚动重优化策略的设计、电价预测层的引入等，均由参赛队成员独立设计，AI 工具仅辅助代码实现。
+\item \textbf{逐项人工审查：}AI 生成的所有代码均经参赛队成员逐一审查，确认算法逻辑与建模设计一致。
+\item \textbf{系统化测试验证：}建立了 122 项单元测试，覆盖优化核、执行器、预测、结算等全部核心模块，确保代码正确性。
+\item \textbf{交叉验证：}对问题一采用 LP 与 DP 双方法互证（最优值之差仅 $7.3\times10^{-12}$ 元），独立验证了优化核的正确性。
+\item \textbf{全年回测核实：}全部结果通过 334 日（2 月 1 日至 12 月 31 日）真实数据的 walk-forward 回测验证，杜绝信息泄漏。
+\end{enumerate}
+
+\end{document}

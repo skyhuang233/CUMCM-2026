@@ -94,24 +94,64 @@ def _arrow(ax, xy_from, xy_to, color=C_GRAY, lw=.9, style="-|>", rad=0):
 
 
 def fig_f01():
-    fig, ax = plt.subplots(figsize=(7.2, 4.7), layout="constrained")
-    ax.set(xlim=(0, 12.6), ylim=(0, 7.2)); ax.axis("off")
-    xs = [1.55, 4.3, 7.05, 9.8]
-    width, height = 2.45, 1.45
-    headings = ["问 1 · 确定性", "问 2 · 随机场景", "问 3 · 滚动调整", "问 4 · 波动电价"]
-    layers = [
-        (4.6, "预测与\n场景", "#EAF2EF", ["附件 1 曲线\n负载、光伏、电价", "分解式负载预测\n配对残差场景", "正式光伏预报\n0 / 6 / 12 / 18 时", "两分支电价预测\n三通道配对场景"]),
-        (2.55, "采购\n优化", "#E9EFF5", ["确定性线性规划\n全天购电计划", "样本平均近似\n跨日价值定价", "冻结全天原计划\n滚动提交调整量", "价格场景优化\n沿用两种交易权限"]),
-        (.5, "执行与\n结算", "#F0EDF4", ["连续状态 DP\n与 LP 最优值互证", "动态库存保留\n因果充放电执行", "执行至下轮更新\n调整与紧急费结算", "真值电价结算\n末库存连续结转"]),
+    # The overview figure is deliberately a modular architecture rather than a
+    # table: each question has the same input -> optimization -> execution
+    # grammar, while the arrows show the information/value-function progression.
+    fig, ax = plt.subplots(figsize=(7.2, 5.6), layout="constrained")
+    ax.set(xlim=(0, 12.6), ylim=(0, 10.0)); ax.axis("off")
+
+    # Unified kernel banner.
+    _box(ax, .45, 8.72, 11.7, .7,
+         "信息状态 $\\mathcal{I}_t$ 约束的统一优化核：库存 $e_t$  →  未来费用函数  →  购电决策与因果执行",
+         "#E7EEF3", fontsize=9.2, ec=C_BLUE)
+    ax.text(6.3, 9.67, "四问的预测—采购—执行总体框架", ha="center", va="center",
+            fontsize=12, fontweight="bold", color="#33434F")
+
+    # Four question modules in the style of the reference architecture figures.
+    modules = [
+        ("问 1  ·  确定性", .45, 4.82, "#F2EAF4", "#81709C",
+         "完整信息输入\n附件 1 曲线：负载、光伏、电价",
+         "确定性线性规划\n全天购电计划 + 周期库存",
+         "$F_t(e)$：凸折线价值\nDP 与 LP 最优值互证"),
+        ("问 2  ·  随机场景", 6.55, 4.82, "#EAF3EF", "#298C82",
+         "预测与场景输入\n分解式负载预测 + 配对残差",
+         "样本平均近似\n0:00 冻结计划购电量",
+         "$\\bar H_t(e)$：动态保留\n因果充放电执行"),
+        ("问 3  ·  滚动调整", .45, .92, "#EAF0F6", "#244F73",
+         "信息逐级发布\n正式光伏预报：0 / 6 / 12 / 18 时",
+         "滚动重优化\n冻结计划 + 日内调整权限",
+         "$\\bar H_{t\\mid\\tau}(e)$：\n调整、紧急费与下一轮更新"),
+        ("问 4  ·  波动电价", 6.55, .92, "#F8EEE8", "#B95541",
+         "新增价格场景\n水平 × 日内形状，三通道配对",
+         "两分支价格优化\n沿用问题 2 / 3 交易权限",
+         "$\\bar H_{t\\mid\\tau}(e;p)$：\n真值电价结算、末库存结转"),
     ]
-    for x, title in zip(xs, headings):
-        ax.text(x+width/2,6.85,title,ha="center",fontsize=10)
-    for y, label, fc, cells in layers:
-        _box(ax,.05,y,1.12,height,label,"#F4F6F7",fontsize=9)
-        for x, text in zip(xs,cells):_box(ax,x,y,width,height,text,fc,fontsize=9)
-    for x in xs:
-        for top,bottom in [(4.6,4.0),(2.55,1.95)]:_arrow(ax,(x+width/2,top),(x+width/2,bottom))
-    return save(fig,"fig_f01_framework")
+    w, h = 5.6, 3.35
+    for title, x, y, fc, accent, top, middle, bottom in modules:
+        # Dashed grouping box and colored title strip.
+        ax.add_patch(Rectangle((x, y), w, h, facecolor="#FFFFFF", edgecolor="#69747C",
+                               linewidth=.9, linestyle=(0, (3, 2))))
+        ax.add_patch(Rectangle((x+.12, y+h-.55), w-.24, .4, facecolor=fc,
+                               edgecolor=accent, linewidth=.8))
+        ax.text(x+w/2, y+h-.35, title, ha="center", va="center", fontsize=10,
+                fontweight="bold", color="#33434F")
+        # Three vertically aligned stages.
+        bx, bw, bh = x+.55, w-1.1, .62
+        _box(ax, bx, y+2.13, bw, bh, top, "#FBFCFC", fontsize=8.2, ec=accent)
+        _box(ax, bx, y+1.28, bw, bh, middle, fc, fontsize=8.2, ec=accent)
+        _box(ax, bx, y+.43, bw, bh, bottom, "#F5F2F7", fontsize=8.2, ec=accent)
+        _arrow(ax, (x+w/2, y+2.13), (x+w/2, y+1.90), color=accent, lw=1.0)
+        _arrow(ax, (x+w/2, y+1.28), (x+w/2, y+1.05), color=accent, lw=1.0)
+
+    # Value-function chain and progression arrows between modules.
+    ax.text(6.3, 4.46, r"价值函数链：$F_t(e)$  →  $\bar H_t(e)$  →  $\bar H_{t\mid\tau}(e)$  →  $\bar H_{t\mid\tau}(e;p)$",
+            ha="center", va="center", fontsize=8.7, color="#4F5E66",
+            bbox=dict(boxstyle="round,pad=.22", facecolor="#F1F5EE", edgecolor="#A9B9A6", linewidth=.7))
+    _arrow(ax, (6.12, 6.48), (6.48, 6.48), color="#829B83", lw=1.2)
+    _arrow(ax, (9.35, 4.78), (9.35, 4.35), color="#829B83", lw=1.2)
+    _arrow(ax, (6.48, 2.58), (6.12, 2.58), color="#829B83", lw=1.2)
+    _arrow(ax, (3.25, 4.35), (3.25, 4.78), color="#829B83", lw=1.2)
+    return save(fig, "fig_f01_framework")
 
 
 def fig_f02():

@@ -1,9 +1,9 @@
 \begin{table}[H]\centering
-\caption{组件变化相对对应 24h 基线的费用增量（元）}\label{tab:components}
+\caption{组件变化相对对应单日时域配置的费用增量（元）}\label{tab:components}
 \small\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{4pt}
 \begin{tabularx}{\textwidth}{@{}>{\hsize=1.5\hsize\linewidth=\hsize}L>{\hsize=.875\hsize\linewidth=\hsize}R>{\hsize=.875\hsize\linewidth=\hsize}R>{\hsize=.875\hsize\linewidth=\hsize}R>{\hsize=.875\hsize\linewidth=\hsize}R@{}}
 \toprule
-\rowcolor{cumcmgray} 组件变化 & \shortstack{问 2\\基线 13566396.26} & \shortstack{问 3\\基线 13024596.85} & \shortstack{问 4-2\\基线 14270606.71} & \shortstack{问 4-3\\基线 13716972.04} \\
+\rowcolor{cumcmgray} 组件变化 & \shortstack{问 2\\单日 13566396.26} & \shortstack{问 3\\单日 13024596.85} & \shortstack{问 4-2\\单日 14270606.71} & \shortstack{问 4-3\\单日 13716972.04} \\
 \midrule
 启用 48h 与次日价值 & -36761.01 & -35046.21 & -40706.98 & -23960.45 \\
 启用候选计划重评 & 0.00 & -1974.51 & 0.00 & -34.96 \\
@@ -12,5 +12,5 @@
 改用旧价格预测 & --- & --- & 5524.96 & 3816.14 \\
 \bottomrule
 \end{tabularx}
-\par\vspace{3pt}{\footnotesize 费用增量为变体减基线，负值表示节省；“---”表示该分支不适用。}
+\par\vspace{3pt}{\footnotesize 费用增量为变体减单日时域配置，负值表示节省；”---”表示该分支不适用。}
 \end{table}

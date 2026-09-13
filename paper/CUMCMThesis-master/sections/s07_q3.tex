@@ -38,23 +38,23 @@ C_{\mathrm{real}}=\sum_t\Bigl[p_t\min(G^0_t,G^a_t)+0.5\,p_t\,(G^0_t-G^a_t)^+
 \end{aligned}
 \label{eq:q3lp}
 \end{equation}
-其中 $\Gamma_\tau$ 为按式\eqref{eq:q3bill} 结算的当天已执行部分费用（常数），$V(\cdot)$ 为次日价值函数（主方法；24h 基线用 $-vS$）。调增与调减在同段的净费用为 $+p_u>0$，故最优解中二者不共存。24h 基线在每轮前瞻完整 24 小时；48h 主方法覆盖当天剩余时段与次日全部时段。0:00 冻结的是全天计划 $G^0$，日内调整则\textbf{只提交到下一发布时刻}：之后的段是临时决策，下轮重优化以更新的信息覆盖之。执行层与问题 2 完全相同——每轮重优化后按新的 $\bar H$ 与保留水平因果执行到下一发布时刻。
+其中 $\Gamma_\tau$ 为按式\eqref{eq:q3bill} 结算的当天已执行部分费用（常数），$V(\cdot)$ 为次日价值函数（跨日前瞻配置；单日时域配置用 $-vS$）。调增与调减在同段的净费用为 $+p_u>0$，故最优解中二者不共存。单日时域配置在每轮前瞻完整 24 小时；跨日前瞻配置覆盖当天剩余时段与次日全部时段。0:00 冻结的是全天计划 $G^0$，日内调整则\textbf{只提交到下一发布时刻}：之后的段是临时决策，下轮重优化以更新的信息覆盖之。执行层与问题 2 完全相同——每轮重优化后按新的 $\bar H$ 与保留水平因果执行到下一发布时刻。
 
 在相同结算、初值和交易权限下，若信息集 $\mathcal I\subseteq\mathcal I'$，对应的最优期望费用满足
 \[
 J^*(\mathcal I)-J^*(\mathcal I')\ge0,
 \]
-因为拥有更多信息时仍可执行原信息集下的策略。该不等式描述的是最优策略集合的理论信息价值；本文有限样本中的具体近似策略账单差不必逐日非负，且逐级开放预报时刻同时改变信息和采购调整权限，其全年差额只能作为联合实际效果报告。
+因为拥有更多信息时仍可执行原信息集下的策略。逐级开放预报时刻同时改变信息和采购调整权限，全年差额反映二者的联合效果。
 
-图~\ref{fig:fig_f08_rolling_timeline} 给出滚动机制的时间结构：全天冻结计划与日内提交区间分开表示，48h 主方法的前瞻终点均为次日 24:00，临时决策可被后续信息覆盖。
+图~\ref{fig:fig_f08_rolling_timeline} 给出滚动机制的时间结构：全天冻结计划与日内提交区间分开表示，跨日前瞻配置的前瞻终点均为次日 24:00，临时决策可被后续信息覆盖。
 
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f08_rolling_timeline}
-\caption{问题三滚动决策时间线（48h 主方法）}\label{fig:fig_f08_rolling_timeline}
+\caption{问题三滚动决策时间线（跨日前瞻配置）}\label{fig:fig_f08_rolling_timeline}
 \end{figure}
 
 \subsection{是否需要引入其他时刻的预报}\label{sec:q3issues}
-固定预测方法、场景构造、终端定价与结算口径，逐级开放发布时刻集合 $\{0\}\subset\{0,6\}\subset\{0,6,12\}\subset\{0,6,12,18\}$，四组均采用 24h 基线配置并连续执行全年，结果见图~\ref{fig:fig_f09_issue_marginal}：
+固定预测方法、场景构造、终端定价与结算口径，逐级开放发布时刻集合 $\{0\}\subset\{0,6\}\subset\{0,6,12\}\subset\{0,6,12,18\}$，四组均采用单日时域配置并连续执行全年，结果见图~\ref{fig:fig_f09_issue_marginal}：
 
 
 
@@ -62,23 +62,23 @@ J^*(\mathcal I)-J^*(\mathcal I')\ge0,
 
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f09_issue_marginal}
-\caption{预报时刻组合的全年费用及相邻节省（24h 基线）}\label{fig:fig_f09_issue_marginal}
+\caption{预报时刻组合的全年费用及相邻节省（单日时域配置）}\label{fig:fig_f09_issue_marginal}
 \end{figure}
 
 \subsection{结果}
-主方法（48h+$V(e)$）全年实际费用 \textbf{1298.96 万元}，比问题 2 主方法降低 54.01 万元（4.0\%）：这是正式预报信息与日内调整权限的联合价值。四项费用分解中紧急购电费降至 19.16 万元（问题 2 为 78.23 万元）——日内调整把大部分本须紧急补购的缺口提前转化为 1.5 倍价的调增，避开了 5 倍价；紧急购电量占比从 0.70\% 降至 0.17\%。24 小时基线为 1302.46 万元，与问题 2 一致地支持 48h 组件。指定日期的时段购电、调整量、费用分解与储能结果如下。
+跨日前瞻配置（48h+$V(e)$）全年实际费用 \textbf{1298.96 万元}，比问题 2 降低 54.01 万元（4.0\%）：这是正式预报信息与日内调整权限的联合价值。四项费用分解中紧急购电费降至 19.16 万元（问题 2 为 78.23 万元）——日内调整把大部分本须紧急补购的缺口提前转化为 1.5 倍价的调增，避开了 5 倍价；紧急购电量占比从 0.70\% 降至 0.17\%。单日时域配置为 1302.46 万元，与问题 2 一致地支持跨日前瞻组件。指定日期的时段购电、调整量、费用分解与储能结果如下。
 
 \input{generated/q3_report_tables.tex}
 \FloatBarrier
 
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f16_q3_soc}
-\caption{问题三四个指定日的库存轨迹（48h 主方法）}\label{fig:fig_f16_q3_soc}
+\caption{问题三四个指定日的库存轨迹（跨日前瞻配置）}\label{fig:fig_f16_q3_soc}
 \end{figure}
 
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f12_exec_day}
-\caption{问题三典型日购电调整与库存响应（3 月 20 日，48h 主方法）}\label{fig:fig_f12_exec_day}
+\caption{问题三典型日购电调整与库存响应（3 月 20 日，跨日前瞻配置）}\label{fig:fig_f12_exec_day}
 \end{figure}
 
-图~\ref{fig:fig_f12_exec_day} 对照原计划与各交付段的最终提交值。3 月 20 日累计调增 848.82 kWh、调减 1001.99 kWh，紧急购电 349.18 kWh。正负柱展示采购修正的时段与规模，库存及保留水平用于解释执行约束。竖线标记 6:00、12:00、18:00 更新时刻；该图不把最终提交序列解释为未保存的四轮完整临时计划。单日案例用于说明既定规则，不用于反向选择参数。
+图~\ref{fig:fig_f12_exec_day} 对照原计划与各交付段的最终提交值。3 月 20 日累计调增 848.82 kWh、调减 1001.99 kWh，紧急购电 349.18 kWh。正负柱展示采购修正的时段与规模，库存及保留水平用于解释执行约束。竖线标记 6:00、12:00、18:00 更新时刻。

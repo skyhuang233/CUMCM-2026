@@ -48,6 +48,13 @@ J^*(\mathcal I)-J^*(\mathcal I')\ge0,
 
 图~\ref{fig:fig_f08_rolling_timeline} 给出滚动机制的时间结构：全天冻结计划与日内提交区间分开表示，跨日前瞻配置的前瞻终点均为次日 24:00，临时决策可被后续信息覆盖。
 
+图~\ref{fig:fig_f20_rolling_flowchart} 进一步从算法顺序展示滚动过程：0:00 先冻结全天计划，之后在每个发布时刻用最新信息重优化，只提交到下一发布时刻，再调用执行器逐段运行；当天结束后账单结算，末库存结转到下一日。
+
+\begin{figure}[!htbp]\centering
+\safeincludegraphics[width=0.72\textwidth]{fig_f20_rolling_flowchart}
+\caption{问题三预报发布与滚动重优化流程}\label{fig:fig_f20_rolling_flowchart}
+\end{figure}
+
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f08_rolling_timeline}
 \caption{问题三滚动决策时间线（跨日前瞻配置）}\label{fig:fig_f08_rolling_timeline}

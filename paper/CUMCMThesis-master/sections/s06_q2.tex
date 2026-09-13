@@ -79,6 +79,13 @@ R_t=\max\operatorname*{arg\,min}_{1200\le z\le10800}\bigl\{5p_t\eta z+\bar H_{t+
 
 该规则只使用当段已观测量与 0:00 已构造的 $\bar H$，天然互斥充放电，且紧急购电从不用于充电（假设 5）。图~\ref{fig:fig_f06_dp_mechanism} 展示执行机理：保留水平随时段起伏——未来有高价缺口时抬高（惜放），临近日末且次日凌晨便宜时压低（敢放）；可用放电量同时受库存保留水平和功率上限约束，因此存在库存时仍可能发生紧急购电。图中执行轨迹来自跨日前瞻配置，日初库存承接前一日末值。
 
+为便于读者把公式对应到实际动作，图~\ref{fig:fig_f19_dp_flowchart} 将上述五步压缩为一个带反馈的决策流程：富余时直接充电，出现缺口时先计算保留水平，再在“放电补缺口”和“保留库存”之间分支，最后统一进入下一段。
+
+\begin{figure}[!htbp]\centering
+\safeincludegraphics[width=0.70\textwidth]{fig_f19_dp_flowchart}
+\caption{问题二 DP 价值执行器的逐段决策流程}\label{fig:fig_f19_dp_flowchart}
+\end{figure}
+
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.96\textwidth]{fig_f06_dp_mechanism}
 \caption{问题二库存保留与紧急购电（3 月 20 日，跨日前瞻配置）}\label{fig:fig_f06_dp_mechanism}

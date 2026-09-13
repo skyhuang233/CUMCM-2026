@@ -6,7 +6,7 @@ matplotlib.use("pdf")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import font_manager
-from matplotlib.patches import FancyBboxPatch, Rectangle
+from matplotlib.patches import FancyBboxPatch, Rectangle, Polygon
 from src import data
 ROOT = Path(__file__).resolve().parents[1]
 M30 = ROOT / "results/latest/m30"
@@ -152,6 +152,104 @@ def fig_f01():
     _arrow(ax, (6.48, 2.58), (6.12, 2.58), color="#829B83", lw=1.2)
     _arrow(ax, (3.25, 4.35), (3.25, 4.78), color="#829B83", lw=1.2)
     return save(fig, "fig_f01_framework")
+
+
+def _flow_canvas(height, ymax):
+    fig, ax = plt.subplots(figsize=(7.2, height))
+    fig.subplots_adjust(left=.01, right=.99, bottom=.01, top=.99)
+    ax.set(xlim=(0, 12), ylim=(ymax, 0))
+    ax.axis("off")
+    return fig, ax
+
+
+def _flow_node(ax, x, y, text, w=3.8, h=.68, kind="process"):
+    colors = {"process": ("#EAF1F7", "#66849A"),
+              "action": ("#EAF2E4", "#829975"),
+              "terminal": ("#FAF3D9", "#B8A766"),
+              "decision": ("#F6E8E6", "#BA8B85")}
+    fc, ec = colors[kind]
+    if kind == "decision":
+        patch = Polygon([(x, y-h/2), (x+w/2, y), (x, y+h/2), (x-w/2, y)],
+                        facecolor=fc, edgecolor=ec, linewidth=1)
+    else:
+        patch = FancyBboxPatch((x-w/2, y-h/2), w, h,
+                              boxstyle="round,pad=0,rounding_size=.04",
+                              facecolor=fc, edgecolor=ec, linewidth=1)
+    ax.add_patch(patch)
+    ax.text(x, y, text, ha="center", va="center", fontsize=10,
+            color="#26343D", linespacing=1.3)
+
+
+def _flow_edge(ax, points, label=None, label_at=None):
+    # Explicit orthogonal routes keep branches and feedback outside the nodes.
+    color = "#4E5A61"
+    if len(points) > 2:
+        ax.plot(*zip(*points[:-1]), color=color, lw=1, solid_capstyle="butt")
+    ax.annotate("", xy=points[-1], xytext=points[-2],
+                arrowprops=dict(arrowstyle="-|>", color=color, lw=1,
+                                shrinkA=0, shrinkB=0, mutation_scale=10))
+    if label:
+        ax.text(*label_at, label, ha="center", va="center", fontsize=9.2,
+                color=color, bbox=dict(facecolor="white", edgecolor="none", pad=1.2))
+
+
+def fig_f19():
+    """Decision branches of DPValueExecutor.step and its execution loop."""
+    fig, ax = _flow_canvas(6.8, 11.9)
+    _flow_node(ax, 5.8, .48, "输入当前库存、购电计划与未来费用函数", w=7.1, kind="terminal")
+    _flow_node(ax, 5.8, 1.56, "观测当段真实负载、光伏与电价\n计算净缺口 $r_t$", w=5.2, h=.78)
+    _flow_node(ax, 5.8, 2.89, "$r_t>0$？", w=2.6, h=1.05, kind="decision")
+    _flow_node(ax, 2.15, 4.15, "利用富余电量充电\n受功率上限与库存上限约束", w=3.45, h=.85, kind="action")
+    _flow_node(ax, 8.25, 4.15, "由未来费用函数与当段电价\n计算动态保留水平 $R_t$", w=4.3, h=.85)
+    _flow_node(ax, 8.25, 5.57, "$S_{t-1}>R_t$？", w=3.05, h=1.05, kind="decision")
+    _flow_node(ax, 6.05, 6.88, "限额放电补缺口\n库存不低于保留水平", w=3.15, h=.85, kind="action")
+    _flow_node(ax, 10.2, 6.88, "保留库存\n不放电", w=2.6, h=.85, kind="action")
+    _flow_node(ax, 8.25, 8.15, "剩余缺口由紧急购电补足\n$E_t=r_t-D_t$", w=4.3, h=.78, kind="action")
+    _flow_node(ax, 5.8, 9.3, "更新库存、富余电量与当段费用", w=5.3)
+    _flow_node(ax, 5.8, 10.43, "本轮执行区间结束？", w=3.9, h=1.0, kind="decision")
+    _flow_node(ax, 5.8, 11.48, "输出执行结果与末库存", w=4.2, h=.58, kind="terminal")
+    for a, b in [((5.8,.82),(5.8,1.17)), ((5.8,1.95),(5.8,2.365)),
+                 ((8.25,4.575),(8.25,5.045)), ((5.8,9.64),(5.8,9.93))]:
+        _flow_edge(ax, [a,b])
+    _flow_edge(ax, [(4.5,2.89),(2.15,2.89),(2.15,3.725)], "否（富余）", (2.85,2.68))
+    _flow_edge(ax, [(7.1,2.89),(8.25,2.89),(8.25,3.725)], "是（缺口）", (8.8,3.23))
+    _flow_edge(ax, [(6.725,5.57),(6.05,5.57),(6.05,6.455)], "是", (6.05,5.99))
+    _flow_edge(ax, [(9.775,5.57),(10.2,5.57),(10.2,6.455)], "否", (10.2,5.99))
+    _flow_edge(ax, [(6.05,7.305),(6.05,7.56),(8.25,7.56),(8.25,7.76)])
+    _flow_edge(ax, [(10.2,7.305),(10.2,7.56),(8.25,7.56),(8.25,7.76)])
+    _flow_edge(ax, [(8.25,8.54),(8.25,8.78),(5.8,8.78),(5.8,8.96)])
+    _flow_edge(ax, [(2.15,4.575),(2.15,9.3),(3.15,9.3)])
+    _flow_edge(ax, [(3.85,10.43),(.2,10.43),(.2,1.56),(3.2,1.56)],
+               "否：进入下一段", (1.95,10.43))
+    _flow_edge(ax, [(5.8,10.93),(5.8,11.19)], "是", (6.18,11.05))
+    return save(fig, "fig_f19_dp_flowchart")
+
+
+def fig_f20():
+    """Issue-time loop: freeze at midnight, readjust later, execute one block."""
+    fig, ax = _flow_canvas(6.1, 10.65)
+    _flow_node(ax, 5.35, .49, "承接前一日末库存，设置发布时刻 $\\tau=0$", w=7, kind="terminal")
+    _flow_node(ax, 5.35, 1.6, "接入最新预报与真实库存\n更新预测及配对残差场景", w=5.5, h=.8)
+    _flow_node(ax, 5.35, 2.85, "$\\tau=0$？", w=2.65, h=1, kind="decision")
+    _flow_node(ax, 2.6, 4.05, "求解日前采购模型\n冻结全天原计划 $G^0$", w=4.1, h=.82)
+    _flow_node(ax, 8.1, 4.05, "以当前真实库存重优化\n相对 $G^0$ 调整当天剩余购电量", w=4.5, h=.82)
+    _flow_node(ax, 5.35, 5.38, "提交本轮购电量：仅至下一发布时刻\n后续临时决策留待下轮覆盖", w=7.3, h=.82, kind="action")
+    _flow_node(ax, 5.35, 6.61, "按本轮计划重建未来费用函数\n更新动态库存保留水平", w=5.5, h=.8)
+    _flow_node(ax, 5.35, 7.84, "调用 DP 价值执行器\n逐段执行至下一发布时刻或 24:00", w=6.8, h=.8, kind="action")
+    _flow_node(ax, 5.35, 9.09, "当天结束？", w=3.2, h=1, kind="decision")
+    _flow_node(ax, 5.35, 10.17, "汇总实际账单，末库存结转次日", w=6, kind="terminal")
+    for a,b in [((5.35,.83),(5.35,1.2)), ((5.35,2),(5.35,2.35)),
+                ((5.35,5.79),(5.35,6.21)), ((5.35,7.01),(5.35,7.44)),
+                ((5.35,8.24),(5.35,8.59))]:
+        _flow_edge(ax,[a,b])
+    _flow_edge(ax, [(4.025,2.85),(2.6,2.85),(2.6,3.64)], "是：0:00", (2.6,3.23))
+    _flow_edge(ax, [(6.675,2.85),(8.1,2.85),(8.1,3.64)], "否：6 / 12 / 18 时", (8.1,3.23))
+    _flow_edge(ax, [(2.6,4.46),(2.6,4.75),(5.35,4.75),(5.35,4.97)])
+    _flow_edge(ax, [(8.1,4.46),(8.1,4.75),(5.35,4.75),(5.35,4.97)])
+    _flow_edge(ax, [(6.95,9.09),(11.45,9.09),(11.45,1.6),(8.1,1.6)],
+               "否：推进至下一发布时刻", (9.33,9.09))
+    _flow_edge(ax, [(5.35,9.59),(5.35,9.83)], "是", (5.73,9.69))
+    return save(fig, "fig_f20_rolling_flowchart")
 
 
 def fig_f02():
@@ -360,7 +458,7 @@ def fig_f18():
 
 def main():
     OUT.mkdir(exist_ok=True)
-    made=[fn() for fn in [fig_f01,fig_f02,fig_f03,fig_f14,fig_f04,fig_f06,fig_f07,fig_f08,fig_f09,fig_f12,fig_f10,fig_f11,fig_f13,fig_f18]]
+    made=[fn() for fn in [fig_f01,fig_f02,fig_f03,fig_f14,fig_f04,fig_f19,fig_f06,fig_f07,fig_f20,fig_f08,fig_f09,fig_f12,fig_f10,fig_f11,fig_f13,fig_f18]]
     made += [specified_soc(["q2"],"fig_f15_q2_soc"),specified_soc(["q3"],"fig_f16_q3_soc"),specified_soc(["q4_2","q4_3"],"fig_f17_q4_soc")]
     (OUT/"paper_figures.json").write_text(json.dumps(made,ensure_ascii=False,indent=2)+"\n")
     print("Generated",len(made),"paper figures")

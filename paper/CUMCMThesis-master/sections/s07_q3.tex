@@ -21,15 +21,20 @@ C_{\mathrm{real}}=\sum_t\Bigl[p_t\min(G^0_t,G^a_t)+0.5\,p_t\,(G^0_t-G^a_t)^+
 \begin{equation}
 \begin{aligned}
 \min_{\Delta^\pm,\{\cdot_\omega\}}\quad
-& \Gamma_\tau+\sum_{u>\!6\tau}\bigl(1.5p_u\Delta^+_u-0.5p_u\Delta^-_u\bigr)
-+\frac1M\sum_{\omega}\Bigl[\sum_{u\in\text{次日}}p_u\widetilde G_{\omega,u}
-+\sum_{u}5p_uE_{\omega,u}\Bigr]-\frac1M\sum_\omega V(S_{\omega,\mathrm{end}})\\
+& \Gamma_\tau+\!\sum_{u>6\tau}\!\bigl(1.5p_u\Delta^+_u-0.5p_u\Delta^-_u\bigr)
++\frac1M\sum_{\omega}\Bigl[\sum_{u\in\text{次日}}\!p_u\widetilde G_{\omega,u}
++\sum_{u}5p_uE_{\omega,u}-V(S_{\omega,\mathrm{end}})\Bigr]\\
 \mathrm{s.t.}\quad
-& G^a_u=G^0_u+\Delta^+_u-\Delta^-_u,\quad 0\le\Delta^-_u\le G^0_u,\ \Delta^+_u\ge0, && u>6\tau,\\
-& G^a_u+E_{\omega,u}+V_{\omega,u}+D_{\omega,u}=L_{\omega,u}+C_{\omega,u}+W_{\omega,u}, && \forall\omega,\ u>6\tau,\\
-& \widetilde G_{\omega,u}+E_{\omega,u}+V_{\omega,u}+D_{\omega,u}=L_{\omega,u}+C_{\omega,u}+W_{\omega,u}, && \forall\omega,\ u\in\text{次日},\\
-& S_{\omega,u}=S_{\omega,u-1}+\eta C_{\omega,u}-D_{\omega,u}/\eta,\quad S_{\omega,6\tau}=S_{\mathrm{now}}, && \forall\omega,u,\\
-& 1200\le S_{\omega,u}\le10800,\ 0\le C_{\omega,u},D_{\omega,u}\le\bar P,\ E,W,\widetilde G\ge0, && \forall\omega,u,
+& G^a_u=G^0_u+\Delta^+_u-\Delta^-_u,\quad 0\le\Delta^-_u\le G^0_u,\ \Delta^+_u\ge0,
+  \quad u>6\tau,\\
+& G^a_u+E_{\omega,u}+V_{\omega,u}+D_{\omega,u}=L_{\omega,u}+C_{\omega,u}+W_{\omega,u},
+  \quad \forall\omega,\ u>6\tau,\\
+& \widetilde G_{\omega,u}+E_{\omega,u}+V_{\omega,u}+D_{\omega,u}=L_{\omega,u}+C_{\omega,u}+W_{\omega,u},
+  \quad \forall\omega,\ u\in\text{次日},\\
+& S_{\omega,u}=S_{\omega,u-1}+\eta C_{\omega,u}-D_{\omega,u}/\eta,\quad S_{\omega,6\tau}=S_{\mathrm{now}},
+  \quad \forall\omega,u,\\
+& 1200\le S_{\omega,u}\le10800,\quad 0\le C_{\omega,u},D_{\omega,u}\le\bar P,\quad E,W,\widetilde G\ge0,
+  \quad \forall\omega,u,
 \end{aligned}
 \label{eq:q3lp}
 \end{equation}

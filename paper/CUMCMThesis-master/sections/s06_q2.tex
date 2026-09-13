@@ -7,14 +7,14 @@ C_{\mathrm{real}}=\sum_{d}\sum_{t}\bigl(p_tG^0_{d,t}+5p_tE_{d,t}\bigr).
 \end{equation}
 
 \subsection{预测层：分解式负载预测与三日光伏均值}\label{sec:q2forecast}
-负载呈现明显的双类型结构：周五、周六为低负载日（记 $k=0$），其余为高负载日（$k=1$）；类型由一月前 14 日的平均日电量识别，1 月 15 日起固定。将负载预测分解为\textbf{日电量水平 $\times$ 归一化日内形状}：记 $B_i=\sum_tL_{i,t}$ 为日 $i$ 的日电量，$I_d$ 为 $d$ 之前最近三个同类型日，$J_d$ 为此前 35 天内发生类型切换的日期集，则
+负载预测的经典做法是类型日均值或统计回归\cite{kangcq,hong}。本题负载呈现明显的双类型结构：周五、周六为低负载日（记 $k=0$），其余为高负载日（$k=1$）；类型由一月前 14 日的平均日电量识别，1 月 15 日起固定。将负载预测分解为\textbf{日电量水平 $\times$ 归一化日内形状}：记 $B_i=\sum_tL_{i,t}$ 为日 $i$ 的日电量，$I_d$ 为 $d$ 之前最近三个同类型日，$J_d$ 为此前 35 天内发生类型切换的日期集，则
 \begin{align}
 \hat s_{d,t}&=\frac{\sum_{i\in I_d}L_{i,t}}{\sum_{i\in I_d}B_i}, &&\text{（同类型日内形状）}\label{eq:q2shape}\\
 \beta_d&=\operatorname*{median}_{i\in J_d}\frac{\ln(B_i/B_{i-1})}{k_i-k_{i-1}}, &&\text{（类型切换的对数电量比率）}\label{eq:q2beta}\\
 \hat B_d&=B_{d-1}\exp\bigl[\beta_d(k_d-k_{d-1})\bigr],\qquad
 \hat L_{d,t}=\hat B_d\,\hat s_{d,t}. &&\text{（水平递推 $\times$ 形状）}\label{eq:q2load}
 \end{align}
-预测次日时，水平递推使用当日的\emph{预测}日电量而非尚未结束的真实总量。1 月 15 日前采用当时可得的同星期均值，样本不足回退至最近至多七日均值。光伏点预测取此前最多三个完整日的逐段均值。图~\ref{fig:fig_f04_load_forecast} 给出 3 月 20 日的预测效果：形状复现准确，残差集中在光伏午间波动段——这正是场景层要刻画的不确定性。
+预测次日时，水平递推使用当日的\emph{预测}日电量而非尚未结束的真实总量。1 月 15 日前采用当时可得的同星期均值，样本不足回退至最近至多七日均值。光伏点预测取此前最多三个完整日的逐段均值（光伏功率预测的系统综述见文献\cite{antonanzas}；本题的正式数值预报在问题 3 才可用）。图~\ref{fig:fig_f04_load_forecast} 给出 3 月 20 日的预测效果：形状复现准确，残差集中在光伏午间波动段——这正是场景层要刻画的不确定性。
 
 \begin{figure}[!htbp]\centering
 \safeincludegraphics[width=0.9\textwidth]{fig_f04_load_forecast}
@@ -38,7 +38,7 @@ V_{\omega,t}=\bigl[\hat V_{d,t}+r^{V}_{\omega,t}\bigr]^+,\qquad \omega=1,\dots,M
 \end{figure}
 
 \subsection{采购层：样本平均近似与 48 小时主方法}\label{sec:q2saa}
-0:00 决策“买多少”建模为两阶段随机规划的样本平均近似（SAA）：第一阶段变量为全天计划购电量 $G^0$（跨场景共享），第二阶段为各场景的储能追索与缺口补购 $(C_\omega,D_\omega,S_\omega,E_\omega,W_\omega)$。约束逐条与式\eqref{eq:q1lp} 同构，仅平衡式换成场景曲线并加入紧急购电项。完整模型为
+0:00 决策“买多少”建模为两阶段随机规划\cite{saa-book,birge}的样本平均近似（SAA）\cite{kleywegt}：第一阶段变量为全天计划购电量 $G^0$（跨场景共享），第二阶段为各场景的储能追索与缺口补购 $(C_\omega,D_\omega,S_\omega,E_\omega,W_\omega)$。约束逐条与式\eqref{eq:q1lp} 同构，仅平衡式换成场景曲线并加入紧急购电项。完整模型为
 \begin{equation}
 \begin{aligned}
 \min_{G^0,\{C_\omega,D_\omega,S_\omega,E_\omega,W_\omega\}}\quad

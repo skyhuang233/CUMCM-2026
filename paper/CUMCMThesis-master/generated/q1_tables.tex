@@ -1,28 +1,21 @@
 \begin{table}[!htbp]
 \centering\small
-\caption{问1指定时段购电量（kWh）}\label{tab:q1purchase}
-\begin{tabular}{lrrrrrr}
-\toprule
-时段起点 & 10:00 & 12:00 & 14:00 & 16:00 & 18:00 & 20:00 \\
-\midrule
-购电量 & 0.00 & 480.41 & 0.00 & 445.43 & 531.89 & 0.00 \\
-\bottomrule
+\caption{问1指定时段购电量与四小时充放电汇总（kWh）}\label{tab:q1purchase}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+\tabheadrow 时段起点 & 10:00 & 12:00 & 14:00 & 16:00 & 18:00 & 20:00 \\ \hline
+购电量 & 0.00 & 480.41 & 0.00 & 445.43 & 531.89 & 0.00 \\ \hline
 \end{tabular}
-\end{table}
 
-\begin{table}[!htbp]
-\centering\small
-\caption{问1四小时充放电汇总（kWh）}\label{tab:q1storage}
-\begin{tabular}{lrr}
-\toprule
-时段 & 充电量 & 放电量 \\
-\midrule
-0:00--4:00 & 4500.00 & 0.00 \\
-4:00--8:00 & 833.33 & 6365.84 \\
-8:00--12:00 & 4787.96 & 1703.00 \\
-12:00--16:00 & 5286.04 & 91.10 \\
-16:00--20:00 & 0.00 & 5780.13 \\
-20:00--24:00 & 5333.33 & 2859.87 \\
-\bottomrule
+\vspace{6pt}
+\begin{tabular}{|l|r|r|}
+\hline
+\tabheadrow 时段 & 充电量 & 放电量 \\ \hline
+0:00--4:00 & 4500.00 & 0.00 \\ \hline
+4:00--8:00 & 833.33 & 6365.84 \\ \hline
+8:00--12:00 & 4787.96 & 1703.00 \\ \hline
+12:00--16:00 & 5286.04 & 91.10 \\ \hline
+16:00--20:00 & 0.00 & 5780.13 \\ \hline
+20:00--24:00 & 5333.33 & 2859.87 \\ \hline
 \end{tabular}
 \end{table}
